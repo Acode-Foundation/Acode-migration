@@ -35,6 +35,9 @@ class ExecutorService: BaseService {
                     guard let command = args[safe: 0] as? [String], !command.isEmpty else { throw terminalError("Command is required") }
                     let server = try AlpineStreamServer(command: command, callback: callback)
                     streams.append(server)
+                    server.onStop = { [weak self, weak server] in
+                        self?.runtime.queue.async { self?.streams.removeAll { $0 === server } }
+                    }
                     server.start()
                 case "loadLibrary": throw terminalError("Loading native libraries directly from JavaScript is not supported.")
                 default: callback.error("Unknown Executor action: \(action)")

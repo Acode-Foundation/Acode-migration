@@ -46,6 +46,29 @@ final class AlpineInteractionTests: BridgeTestCase {
                 await wait(first, 'READY:2');
                 input(first, 'hello\r');
                 await wait(first, 'INPUT:hello');
+                const dropped = second.component.websocket;
+                dropped.close();
+                for (let i = 0; i < 100 && (second.component.websocket === dropped || !second.component.isConnected); i++) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+                if (!second.component.isConnected) throw new Error('Terminal did not reconnect');
+                await wait(second, 'STILL:second');
+                input(second, 'printf "BACK:%s\\n" "$ACODE_CHECK"\r');
+                await wait(second, 'BACK:second');
+                second.component.options.port = 9;
+                const lost = second.component.websocket;
+                lost.close();
+                for (let i = 0; i < 100 && !second.component.disconnected; i++) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+                if (!second.component.disconnected || second.component.intentionalClose) throw new Error('Tab was not kept after reconnect failures');
+                second.component.options.port = 8767;
+                document.dispatchEvent(new CustomEvent('resume'));
+                for (let i = 0; i < 100 && (second.component.websocket === lost || !second.component.isConnected); i++) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+                input(second, 'printf "AGAIN:%s\\n" "$ACODE_CHECK"\r');
+                await wait(second, 'AGAIN:second');
                 return {first:content(first), second:content(second)};
             } finally {
                 await manager.close(first.id);
@@ -53,6 +76,6 @@ final class AlpineInteractionTests: BridgeTestCase {
             }
             """#, arguments: [:], in: nil, contentWorld: .page) as? [String: String]
         XCTAssertTrue(result?["first"]?.contains("SIGNAL:130") == true)
-        XCTAssertTrue(result?["second"]?.contains("STILL:second") == true)
+        XCTAssertTrue(result?["second"]?.contains("AGAIN:second") == true)
     }
 }

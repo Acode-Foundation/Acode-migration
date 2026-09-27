@@ -1,4 +1,3 @@
-import AcodeAlpine
 import Foundation
 
 final class AlpineService: BaseService {
@@ -12,19 +11,20 @@ final class AlpineService: BaseService {
                 case "isInstalled": callback.success(runtime.installed)
                 case "isAxsRunning":
                     try runtime.shareFiles()
-                    callback.success(runtime.serverID.flatMap { runtime.processes[$0] }.map { alpine_running($0.pid) } ?? false)
+                    callback.success(TerminalServer.shared.isRunning)
                 case "install": try install(callback)
                 case "backup", "restore", "uninstall", "clearBackup": try AlpineMaintenance.perform(action, callback: callback)
                 case "startAxs":
                     try runtime.shareFiles()
-                    if let id = runtime.serverID, let process = runtime.processes[id], alpine_running(process.pid) {
-                        callback.success(); return
+                    let failsafe = args[safe: 0] as? Bool == true
+                    let start = {
+                        TerminalServer.shared.start(shell: failsafe ? "exec sh" : "exec bash --rcfile /initrc -i") { error in
+                            if let error { callback.error(error.localizedDescription) } else { callback.success() }
+                        }
                     }
-                    let command = args[safe: 0] as? Bool == true ? "exec /acode/axs -c sh" : "exec /bin/sh /acode/init-alpine.sh"
-                    runtime.serverID = try runtime.start(command).id
-                    callback.success()
+                    if failsafe { start() } else { runtime.prepare(start) }
                 case "stopAxs":
-                    if let id = runtime.serverID { runtime.stop(id) }
+                    TerminalServer.shared.stop()
                     callback.success()
                 default: callback.error("Unknown Alpine action: \(action)")
                 }

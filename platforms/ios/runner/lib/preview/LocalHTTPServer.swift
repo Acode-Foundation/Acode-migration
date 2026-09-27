@@ -15,8 +15,13 @@ final class LocalHTTPServer {
         self.queue = queue
         let parameters = NWParameters.tcp
         parameters.allowLocalEndpointReuse = true
-        if loopback { parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: endpoint) }
-        listener = try NWListener(using: parameters, on: endpoint)
+        // A port passed to `on:` as well as in requiredLocalEndpoint fails with EINVAL.
+        if loopback {
+            parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: endpoint)
+            listener = try NWListener(using: parameters)
+        } else {
+            listener = try NWListener(using: parameters, on: endpoint)
+        }
         listener.newConnectionLimit = 64
     }
 

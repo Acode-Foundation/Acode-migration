@@ -1,14 +1,18 @@
 import AcodeAlpine
 import Foundation
+import UIKit
 
 final class AlpineRuntime {
     static let shared = AlpineRuntime()
     let queue = DispatchQueue(label: "app.acode.alpine", qos: .userInitiated)
     let files = AppFiles.shared
     private(set) var processes: [String: AlpineProcess] = [:]
+    private var terminals: [Int32: TerminalSession] = [:]
     private var booted = false
+    private var prepared = false
+    private var preparing: [() -> Void]?
+    private var suspended = false
     private(set) var maintaining = false
-    var serverID: String?
     private var sharedPaths = Set<String>()
 
     // The guest root must sit outside every host bind mount. Otherwise the
@@ -21,6 +25,17 @@ final class AlpineRuntime {
          "PREFIX=/acode", "ALPINE_ROOT=/", "TERM=xterm-256color", "SHELL=/bin/bash",
          "ANDROID_TZ=\(TimeZone.current.identifier)", "GODEBUG=asyncpreemptoff=1", "GOMAXPROCS=2",
          "PYTHONMALLOC=malloc", "PYTHONDONTWRITEBYTECODE=1"].joined(separator: "\0") + "\0\0"
+    }
+
+    private init() {
+        // Guest servers keep listening across suspension; iOS reclaims their host sockets meanwhile.
+        let center = NotificationCenter.default
+        center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.suspend()
+        }
+        center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.resume()
+        }
     }
 
     func extract() throws {
@@ -63,15 +78,14 @@ final class AlpineRuntime {
     @discardableResult
     func start(_ command: String, background: Bool = false,
                listener: ((String, String) -> Void)? = nil,
+               rawOutput: ((Data) -> Void)? = nil,
                completion: ((Int32, String, String) -> Void)? = nil) throws -> AlpineProcess {
-        guard !maintaining else { throw failure("Alpine maintenance is in progress") }
-        try boot()
-        try shareFiles()
+        try ready()
         let process = AlpineProcess(command: command, background: background)
         process.listener = listener
+        process.rawOutput = rawOutput
         process.completion = completion
-        let script = "cd /public; " + command
-        let pid = script.withCString { script in
+        let pid = shellScript(command).withCString { script in
             environment.withCString { env in
                 alpine_start(script, env, process.input.fileHandleForReading.fileDescriptor,
                              process.output.fileHandleForWriting.fileDescriptor, process.errors.fileHandleForWriting.fileDescriptor)
@@ -83,6 +97,49 @@ final class AlpineRuntime {
         processes[process.id] = process
         process.observe(on: queue)
         return process
+    }
+
+    /// Starts a command on a guest pseudo-terminal whose I/O runs on `terminalQueue`.
+    func startTerminal(_ command: String, rows: Int, cols: Int, queue terminalQueue: DispatchQueue,
+                       scrollbackLimit: Int = TerminalSession.replayLimit) throws -> TerminalSession {
+        try ready()
+        let session = TerminalSession(queue: terminalQueue, scrollbackLimit: scrollbackLimit)
+        let context = Unmanaged.passRetained(session).toOpaque()
+        var handle: OpaquePointer?
+        let pid = shellScript(command).withCString { script in
+            environment.withCString { env in
+                alpine_terminal_start(script, env, Int32(rows), Int32(cols), context, terminalCallbacks, &handle)
+            }
+        }
+        try check(pid)
+        guard let handle else { throw failure("Could not open a terminal") }
+        session.started(pid: pid, handle: handle)
+        terminals[pid] = session
+        return session
+    }
+
+    /// Kills a hung-up shell that ignored SIGHUP once it had a chance to exit.
+    func killTerminal(_ session: TerminalSession) {
+        queue.asyncAfter(deadline: .now() + 1) { [self] in
+            if terminals[session.pid] === session { _ = alpine_kill(session.pid) }
+        }
+    }
+
+    /// Runs the shared setup script once per boot so each shell only has to start bash.
+    func prepare(_ completion: @escaping () -> Void) {
+        if prepared { completion(); return }
+        guard preparing == nil else { preparing?.append(completion); return }
+        preparing = [completion]
+        do {
+            try start("exec /bin/sh /acode/init-alpine.sh --prepare", completion: { [self] status, _, errors in
+                if status == 0 { prepared = true }
+                else { print("Alpine setup exited with status \(status): \(errors)") }
+                finishPreparing()
+            })
+        } catch {
+            print("Alpine setup failed: \(error.localizedDescription)")
+            finishPreparing()
+        }
     }
 
     func execute(_ command: String, callback: Callback) throws {
@@ -108,13 +165,40 @@ final class AlpineRuntime {
         waitForShutdown(deadline: Date().addingTimeInterval(10), completion: completion)
     }
 
+    func shareFiles() throws {
+        guard booted else { return }
+        for (name, url) in files.allRoots() where name != "application" {
+            for path in Set([url.path, url.resolvingSymlinksInPath().path]) {
+                if sharedPaths.contains(path) { continue }
+                try check(alpine_bind(path, url.path, false))
+                sharedPaths.insert(path)
+            }
+        }
+    }
+
+    private func ready() throws {
+        guard !maintaining else { throw failure("Alpine maintenance is in progress") }
+        try boot()
+        try shareFiles()
+    }
+
+    private func shellScript(_ command: String) -> String {
+        "cd /public; " + command
+    }
+
+    private func finishPreparing() {
+        let waiting = preparing ?? []
+        preparing = nil
+        for completion in waiting { completion() }
+    }
+
     private func waitForShutdown(deadline: Date, completion: @escaping (Error?) -> Void) {
         if alpine_idle() {
             do {
                 try check(alpine_unmount())
                 booted = false
+                prepared = false
                 sharedPaths.removeAll()
-                serverID = nil
                 maintaining = false
                 completion(nil)
             } catch { maintaining = false; completion(error) }
@@ -127,23 +211,22 @@ final class AlpineRuntime {
     }
 
     private func didExit(pid: Int32, status: Int32) {
-        if let process = processes.values.first(where: { $0.pid == pid }) {
-            process.finish(status)
-            if process.id == serverID { serverID = nil }
-        }
+        terminals.removeValue(forKey: pid)?.finish(status)
+        if let process = processes.values.first(where: { $0.pid == pid }) { process.finish(status) }
         alpine_reap()
         processes = processes.filter { $0.value.status == nil || $0.value.completion != nil || $0.value.listener != nil }
     }
 
-    func shareFiles() throws {
-        guard booted else { return }
-        for (name, url) in files.allRoots() where name != "application" {
-            for path in Set([url.path, url.resolvingSymlinksInPath().path]) {
-                if sharedPaths.contains(path) { continue }
-                try check(alpine_bind(path, url.path, false))
-                sharedPaths.insert(path)
-            }
-        }
+    private func suspend() {
+        guard !suspended else { return }
+        suspended = true
+        alpine_suspend()
+    }
+
+    private func resume() {
+        guard suspended else { return }
+        suspended = false
+        alpine_resume()
     }
 
     private func check(_ result: Int32) throws {

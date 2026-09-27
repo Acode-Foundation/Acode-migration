@@ -320,7 +320,8 @@ if meson.is_cross_build()
         include_directories: [include_directories('deps'), include_directories('deps/libarchive/libarchive')],
         c_args: ['-DHAVE_CONFIG_H', '-I' + meson.get_external_property('sdk_path') + '/usr/include/libxml2', '-w'])
     acode_alpine = static_library('acode_alpine',
-        ['../../Bridge/AlpineRuntime.c', '../../Bridge/AlpineFaults.c', '../../Bridge/AlpineArchive.c', 'tools/fakefs.c'],
+        ['../../Bridge/AlpineRuntime.c', '../../Bridge/AlpineTerminal.c', '../../Bridge/AlpineFaults.c',
+         '../../Bridge/AlpineArchive.c', 'tools/fakefs.c'],
         include_directories: [includes, include_directories('deps/libarchive/libarchive')],
         c_args: ['-I' + meson.project_source_root() + '/../../include'])
 endif

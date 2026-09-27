@@ -27,10 +27,14 @@ final class AlpineProcess {
          "startedAt": startedAt, "background": background]
     }
 
+    /// Line output and exit bookkeeping run on `queue`; raw stdout goes straight
+    /// from the pipe's reader thread so streaming never waits behind guest calls.
     func observe(on queue: DispatchQueue) {
         for (kind, pipe) in [("stdout", output), ("stderr", errors)] {
+            let raw = kind == "stdout" ? rawOutput : nil
             pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
                 let data = handle.availableData
+                if let raw, !data.isEmpty { raw(data); return }
                 if data.isEmpty { handle.readabilityHandler = nil }
                 queue.async { self?.receive(data, kind: kind) }
             }
@@ -53,7 +57,6 @@ final class AlpineProcess {
     }
 
     private func receive(_ data: Data, kind: String) {
-        if kind == "stdout", let rawOutput, !data.isEmpty { rawOutput(data); return }
         pending[kind, default: Data()].append(data)
         // Executor uses lines on Android. Buffering also preserves split UTF-8 sequences.
         while let end = pending[kind]!.firstIndex(of: 10) {
