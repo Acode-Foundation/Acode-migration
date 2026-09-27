@@ -7,6 +7,7 @@ final class TerminalServer {
     static let shared = TerminalServer()
     private static let port = 8767
     private static let origins: Set = ["https://localhost", "acode://localhost"]
+    private static let captureLimit = 16 * 1024 * 1024
     private let queue = DispatchQueue(label: "app.acode.terminal", qos: .userInitiated)
     private let runtime = AlpineRuntime.shared
     private var server: LocalHTTPServer?
@@ -116,28 +117,46 @@ final class TerminalServer {
         }
     }
 
+    /// Matches AXS: `sh -c` on an 80×24 PTY in `cwd` (default HOME), answered when the
+    /// shell exits or after 30 s. Pipe-based execution stays available as `Executor.execute`.
     private func execute(_ request: LocalHTTPRequest, _ respond: @escaping (Int, Any) -> Void) {
         let body = (try? JSONSerialization.jsonObject(with: request.body)) as? [String: Any] ?? [:]
         guard let command = body["command"] as? String else { respond(400, ["output": "", "error": "Command is required"]); return }
         let directory = (body["cwd"] as? String ?? body["u_cwd"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-        let script = (directory.map { "cd \(shellQuote($0)) || exit 1; " } ?? "") + "{ \(command)\n} 2>&1"
+        let script = (directory.map { "cd \(shellQuote($0)); " } ?? "") + "exec sh -c \(shellQuote(command))"
         var answered = false
-        let answer = { [queue] (status: Int, output: String, error: String?) in
-            queue.async {
-                guard !answered else { return }
-                answered = true
-                respond(status, ["output": Self.stripEscapes(output), "error": error.map { $0 as Any } ?? NSNull()])
+        let answer = { (status: Int, output: String, error: String?) in
+            guard !answered else { return }
+            answered = true
+            respond(status, ["output": Self.stripEscapes(output), "error": error.map { $0 as Any } ?? NSNull()])
+        }
+        let run = { [self] in
+            do {
+                let session = try runtime.startTerminal(script, rows: 24, cols: 80, queue: queue, scrollbackLimit: Self.captureLimit)
+                queue.async { [self] in
+                    session.onExit = { [weak session] _ in
+                        answer(200, String(decoding: session?.capturedOutput ?? Data(), as: UTF8.self), nil)
+                    }
+                    // Background children can outlive the shell, so the deadline tracks the response.
+                    queue.asyncAfter(deadline: .now() + 30) { [self] in
+                        guard !answered else { return }
+                        terminate(session)
+                        answer(500, "", "Command execution timed out")
+                    }
+                }
+            } catch {
+                queue.async { answer(500, "", error.localizedDescription) }
             }
         }
-        runtime.queue.async { [runtime] in
+        runtime.queue.async { [self] in
+            guard let directory else { run(); return }
             do {
-                let process = try runtime.start(script, completion: { _, output, _ in answer(200, output, nil) })
-                runtime.queue.asyncAfter(deadline: .now() + 30) {
-                    guard process.status == nil else { return }
-                    runtime.stop(process.id)
-                    answer(500, "", "Command execution timed out")
-                }
-            } catch { answer(500, "", error.localizedDescription) }
+                try runtime.start("test -d \(shellQuote(directory))", completion: { [self] status, _, _ in
+                    if status == 0 { run() } else { queue.async { answer(400, "", "Working directory does not exist") } }
+                })
+            } catch {
+                queue.async { answer(500, "", error.localizedDescription) }
+            }
         }
     }
 

@@ -99,15 +99,16 @@ final class AlpineRuntime {
         return process
     }
 
-    /// Starts an interactive command on a guest pseudo-terminal whose I/O runs on `terminalQueue`.
-    func startTerminal(_ command: String, rows: Int, cols: Int, queue terminalQueue: DispatchQueue) throws -> TerminalSession {
+    /// Starts a command on a guest pseudo-terminal whose I/O runs on `terminalQueue`.
+    func startTerminal(_ command: String, rows: Int, cols: Int, queue terminalQueue: DispatchQueue,
+                       scrollbackLimit: Int = TerminalSession.replayLimit) throws -> TerminalSession {
         try ready()
-        let session = TerminalSession(queue: terminalQueue)
+        let session = TerminalSession(queue: terminalQueue, scrollbackLimit: scrollbackLimit)
         let context = Unmanaged.passRetained(session).toOpaque()
         var handle: OpaquePointer?
         let pid = shellScript(command).withCString { script in
             environment.withCString { env in
-                alpine_terminal_start(script, env, Int32(rows), Int32(cols), context, terminalOutput, terminalRelease, &handle)
+                alpine_terminal_start(script, env, Int32(rows), Int32(cols), context, terminalCallbacks, &handle)
             }
         }
         try check(pid)

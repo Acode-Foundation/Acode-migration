@@ -31,6 +31,8 @@ import TerminalTouchSelection from "./terminalTouchSelection";
 
 // Backoff for re-attaching to a live PTY after the socket drops (e.g. app suspension).
 const RECONNECT_DELAYS = [0, 500, 1500, 3000];
+const DISCONNECTED_NOTICE =
+	"\r\n\x1b[2m[Disconnected from terminal session. Press any key to reconnect.]\x1b[0m\r\n";
 
 export default class TerminalComponent {
 	constructor(options = {}) {
@@ -85,6 +87,8 @@ export default class TerminalComponent {
 		this.intentionalClose = false;
 		this.processExited = false;
 		this.reconnectAttempts = 0;
+		this.disconnected = false;
+		this.boundResumeConnection = null;
 
 		this.init();
 	}
@@ -152,6 +156,11 @@ export default class TerminalComponent {
 
 		// Handle custom OSC 7777 for acode CLI commands
 		this.setupOscHandler();
+
+		// Retry a dropped session on the next keypress or when the app returns
+		this.terminal.onData(() => this.resumeConnection());
+		this.boundResumeConnection = () => this.resumeConnection();
+		document.addEventListener("resume", this.boundResumeConnection);
 	}
 
 	/**
@@ -812,8 +821,9 @@ export default class TerminalComponent {
 	/**
 	 * Connect to terminal session via WebSocket
 	 * @param {string} pid - Terminal PID
+	 * @param {boolean} reattach - Clear the screen before the server replays recent output
 	 */
-	async connectToSession(pid) {
+	async connectToSession(pid, reattach = false) {
 		if (!this.serverMode) {
 			throw new Error(
 				"Terminal is in local mode, cannot connect to server session",
@@ -860,6 +870,7 @@ export default class TerminalComponent {
 				hasOpened = true;
 				this.isConnected = true;
 				this.onConnect?.();
+				if (reattach) this.terminal.reset();
 
 				// Load attach addon after connection
 				this.attachAddon = new AttachAddon(websocket);
@@ -911,17 +922,16 @@ export default class TerminalComponent {
 					return;
 				}
 
-				const info = {
-					intentional: this.intentionalClose,
-					processExited: this.processExited,
-					code: event?.code,
-					reason: event?.reason,
-				};
-				if (info.intentional || info.processExited) {
-					this.onDisconnect?.(info);
+				if (this.intentionalClose || this.processExited) {
+					this.onDisconnect?.({
+						intentional: this.intentionalClose,
+						processExited: this.processExited,
+						code: event?.code,
+						reason: event?.reason,
+					});
 					return;
 				}
-				void this.reconnectToSession(info);
+				void this.reconnectToSession();
 			};
 
 			websocket.onerror = (error) => {
@@ -942,13 +952,15 @@ export default class TerminalComponent {
 	}
 
 	/**
-	 * Re-attach to the same PTY after an unexpected disconnect. The backend
-	 * replays recent output, so the screen is reset before reconnecting.
-	 * @param {object} info - Disconnect details forwarded if reconnecting fails
+	 * Re-attach to the same PTY after an unexpected disconnect. When the backend
+	 * stays unreachable the tab is kept and marked disconnected: the shell may
+	 * still be alive, so only its exit or an explicit close ends the session.
 	 */
-	async reconnectToSession(info) {
+	async reconnectToSession() {
 		if (this.reconnectAttempts >= RECONNECT_DELAYS.length) {
-			this.onDisconnect?.(info);
+			this.reconnectAttempts = 0;
+			this.disconnected = true;
+			this.terminal.write(DISCONNECTED_NOTICE);
 			return;
 		}
 		const delay = RECONNECT_DELAYS[this.reconnectAttempts++];
@@ -958,13 +970,23 @@ export default class TerminalComponent {
 		try {
 			this.attachAddon?.dispose();
 			this.attachAddon = null;
-			this.terminal.reset();
-			await this.connectToSession(this.pid);
+			await this.connectToSession(this.pid, true);
 			if (this.intentionalClose) this.websocket?.close();
 		} catch (error) {
 			console.error(`Failed to reconnect terminal ${this.pid}:`, error);
-			await this.reconnectToSession(info);
+			await this.reconnectToSession();
 		}
+	}
+
+	/**
+	 * Retry a disconnected session, e.g. on input or when the app returns to the foreground.
+	 */
+	resumeConnection() {
+		if (!this.disconnected || this.intentionalClose || this.processExited) {
+			return;
+		}
+		this.disconnected = false;
+		void this.reconnectToSession();
 	}
 
 	/**
@@ -1503,6 +1525,11 @@ export default class TerminalComponent {
 	dispose() {
 		this.intentionalClose = true;
 		this.terminate();
+
+		if (this.boundResumeConnection) {
+			document.removeEventListener("resume", this.boundResumeConnection);
+			this.boundResumeConnection = null;
+		}
 
 		// Dispose touch selection
 		if (this.touchSelection) {

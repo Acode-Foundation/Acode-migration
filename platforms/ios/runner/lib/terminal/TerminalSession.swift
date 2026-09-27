@@ -1,15 +1,16 @@
 import AcodeAlpine
 import Foundation
 
-/// One interactive shell on a guest pseudo-terminal. Output arrives on guest
-/// threads; everything else runs on the terminal server's queue.
+/// One command on a guest pseudo-terminal. Output arrives on guest threads;
+/// everything else runs on the terminal server's queue.
 final class TerminalSession {
-    private static let scrollbackLimit = 256 * 1024
+    static let replayLimit = 256 * 1024
     private static let unsentLimit = 1024 * 1024
     private static let frameSize = 8 * 1024
     private static let coalesceDelay = DispatchTimeInterval.milliseconds(8)
     private let queue: DispatchQueue
-    private let output = NSCondition()
+    private let scrollbackLimit: Int
+    private let output = NSLock()
     private var scrollback = Data()
     private var pending = Data()
     private var unsent = 0
@@ -21,9 +22,25 @@ final class TerminalSession {
     private var status: Int32?
     private(set) var pid: Int32 = 0
     var onFinish: (() -> Void)?
+    var onExit: ((Int32) -> Void)?
 
-    init(queue: DispatchQueue) {
+    /// Keeps the last `scrollbackLimit` bytes for replay on reattach or for `capturedOutput`.
+    init(queue: DispatchQueue, scrollbackLimit: Int = replayLimit) {
         self.queue = queue
+        self.scrollbackLimit = scrollbackLimit
+    }
+
+    var capturedOutput: Data {
+        output.lock()
+        defer { output.unlock() }
+        return Data(scrollback.suffix(scrollbackLimit))
+    }
+
+    /// Queried by blocking guest writers, which wait while the client is behind.
+    var congested: Bool {
+        output.lock()
+        defer { output.unlock() }
+        return attached && unsent > Self.unsentLimit
     }
 
     func started(pid: Int32, handle: OpaquePointer) {
@@ -40,11 +57,10 @@ final class TerminalSession {
         }
         self.socket?.close()
         output.lock()
-        let history = scrollback.suffix(Self.scrollbackLimit)
+        let history = scrollback.suffix(Self.replayLimit)
         pending.removeAll()
         unsent = 0
         attached = true
-        output.broadcast()
         output.unlock()
         self.socket = socket
         socket.onMessage = { [weak self] data, _ in self?.write(data) }
@@ -72,18 +88,20 @@ final class TerminalSession {
             status = code
             close()
             flush()
+            onExit?(code)
+            onExit = nil
             guard let socket else { return }
             socket.send(Self.exitMessage(code), text: true) { socket.close() }
             onFinish?()
         }
     }
 
-    /// Runs on guest threads and blocks the writer while the client falls behind.
-    func receive(_ data: Data, blocking: Bool) {
+    /// Runs on guest threads.
+    func receive(_ data: Data) {
         output.lock()
         scrollback.append(data)
-        if scrollback.count > Self.scrollbackLimit * 2 {
-            scrollback = Data(scrollback.suffix(Self.scrollbackLimit))
+        if scrollback.count > scrollbackLimit * 2 {
+            scrollback = Data(scrollback.suffix(scrollbackLimit))
         }
         guard attached else { output.unlock(); return }
         pending.append(data)
@@ -94,12 +112,6 @@ final class TerminalSession {
         output.unlock()
         if immediate { queue.async { self.flush() } }
         else if schedule { queue.asyncAfter(deadline: .now() + Self.coalesceDelay) { self.flush() } }
-        guard blocking else { return }
-        output.lock()
-        while attached, unsent > Self.unsentLimit {
-            output.wait(until: Date().addingTimeInterval(0.1))
-        }
-        output.unlock()
     }
 
     private func flush() {
@@ -115,8 +127,8 @@ final class TerminalSession {
     private func acknowledge(_ count: Int) {
         output.lock()
         unsent = max(0, unsent - count)
-        output.broadcast()
         output.unlock()
+        wakeWriters()
     }
 
     private func detach() {
@@ -125,8 +137,13 @@ final class TerminalSession {
         attached = false
         pending.removeAll()
         unsent = 0
-        output.broadcast()
         output.unlock()
+        wakeWriters()
+    }
+
+    private func wakeWriters() {
+        guard let handle else { return }
+        alpine_terminal_drained(handle)
     }
 
     private func write(_ data: Data) {
@@ -163,13 +180,17 @@ final class TerminalSession {
     }
 }
 
-let terminalOutput: AlpineTerminalOutput = { context, data, length, blocking in
-    guard let context, let data else { return }
-    Unmanaged<TerminalSession>.fromOpaque(context).takeUnretainedValue()
-        .receive(Data(bytes: data, count: length), blocking: blocking)
-}
-
-let terminalRelease: AlpineTerminalRelease = { context in
-    guard let context else { return }
-    Unmanaged<TerminalSession>.fromOpaque(context).release()
-}
+let terminalCallbacks = AlpineTerminalCallbacks(
+    output: { context, data, length in
+        guard let context, let data else { return }
+        Unmanaged<TerminalSession>.fromOpaque(context).takeUnretainedValue().receive(Data(bytes: data, count: length))
+    },
+    congested: { context in
+        guard let context else { return false }
+        return Unmanaged<TerminalSession>.fromOpaque(context).takeUnretainedValue().congested
+    },
+    release: { context in
+        guard let context else { return }
+        Unmanaged<TerminalSession>.fromOpaque(context).release()
+    }
+)

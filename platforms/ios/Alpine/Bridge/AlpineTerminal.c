@@ -17,8 +17,10 @@ struct AlpineTerminal {
     int rows;
     int cols;
     void *context;
-    AlpineTerminalOutput output;
-    AlpineTerminalRelease release;
+    AlpineTerminalCallbacks callbacks;
+    lock_t lock;
+    cond_t drained;
+    bool closed;
 };
 
 static int terminal_write(struct tty *tty, const void *data, size_t length, bool blocking);
@@ -33,15 +35,17 @@ static const struct tty_driver_ops terminal_ops = {
 static struct tty_driver terminal_driver = {.ops = &terminal_ops};
 
 int alpine_terminal_start(const char *command, const char *environment, int rows, int cols,
-                          void *context, AlpineTerminalOutput output, AlpineTerminalRelease release,
-                          AlpineTerminal **handle) {
+                          void *context, AlpineTerminalCallbacks callbacks, AlpineTerminal **handle) {
     *handle = NULL;
     AlpineTerminal *terminal = calloc(1, sizeof(AlpineTerminal));
-    if (terminal == NULL) { release(context); return _ENOMEM; }
-    *terminal = (AlpineTerminal) {.rows = rows, .cols = cols, .context = context, .output = output, .release = release};
+    if (terminal == NULL) { callbacks.release(context); return _ENOMEM; }
+    *terminal = (AlpineTerminal) {.rows = rows, .cols = cols, .context = context, .callbacks = callbacks};
+    lock_init(&terminal->lock);
+    cond_init(&terminal->drained);
     int pid = alpine_spawn(command, environment, attach_terminal, terminal);
     if (terminal->tty == NULL) {
-        release(context);
+        callbacks.release(context);
+        cond_destroy(&terminal->drained);
         free(terminal);
     } else if (pid < 0) {
         alpine_terminal_close(terminal);
@@ -64,7 +68,17 @@ void alpine_terminal_resize(AlpineTerminal *terminal, int rows, int cols) {
     if (foreground != 0) send_group_signal(foreground, SIGWINCH_, SIGINFO_NIL);
 }
 
+void alpine_terminal_drained(AlpineTerminal *terminal) {
+    lock(&terminal->lock);
+    notify(&terminal->drained);
+    unlock(&terminal->lock);
+}
+
 void alpine_terminal_close(AlpineTerminal *terminal) {
+    lock(&terminal->lock);
+    terminal->closed = true;
+    notify(&terminal->drained);
+    unlock(&terminal->lock);
     struct tty *tty = terminal->tty;
     lock(&tty->lock);
     pid_t_ session = tty->session;
@@ -80,16 +94,31 @@ void alpine_terminal_close(AlpineTerminal *terminal) {
 }
 
 // Runs on guest threads. The tty lock may be held (echo), so it must not re-enter the tty.
+// A blocking writer waits like on a full pipe while the client is behind. wait_for
+// returns _EINTR for pending guest signals, so Ctrl-C and SIGKILL still get through,
+// and nothing has been written yet when it does.
 static int terminal_write(struct tty *tty, const void *data, size_t length, bool blocking) {
     AlpineTerminal *terminal = tty->data;
-    terminal->output(terminal->context, data, length, blocking);
+    if (blocking) {
+        int result = 0;
+        lock(&terminal->lock);
+        while (result == 0 && !terminal->closed && terminal->callbacks.congested(terminal->context)) {
+            struct timespec recheck = {.tv_nsec = 100 * 1000 * 1000};
+            result = wait_for(&terminal->drained, &terminal->lock, &recheck);
+            if (result == _ETIMEDOUT) result = 0;
+        }
+        unlock(&terminal->lock);
+        if (result < 0) return result;
+    }
+    terminal->callbacks.output(terminal->context, data, length);
     return 0;
 }
 
 // Runs once the host and every guest descriptor have released the tty.
 static void terminal_cleanup(struct tty *tty) {
     AlpineTerminal *terminal = tty->data;
-    terminal->release(terminal->context);
+    terminal->callbacks.release(terminal->context);
+    cond_destroy(&terminal->drained);
     free(terminal);
 }
 
