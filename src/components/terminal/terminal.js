@@ -29,6 +29,9 @@ import TerminalThemeManager from "./terminalThemeManager";
 import TerminalTouchScrolling from "./terminalTouchScrolling";
 import TerminalTouchSelection from "./terminalTouchSelection";
 
+// Backoff for re-attaching to a live PTY after the socket drops (e.g. app suspension).
+const RECONNECT_DELAYS = [0, 500, 1500, 3000];
+
 export default class TerminalComponent {
 	constructor(options = {}) {
 		// Get terminal settings from shared defaults
@@ -81,6 +84,7 @@ export default class TerminalComponent {
 		// Lifecycle flags so exit/disconnect/error don't race into zombie tabs
 		this.intentionalClose = false;
 		this.processExited = false;
+		this.reconnectAttempts = 0;
 
 		this.init();
 	}
@@ -873,6 +877,8 @@ export default class TerminalComponent {
 			};
 
 			websocket.onmessage = (event) => {
+				// Any frame (the server replays scrollback first) proves the session is alive.
+				this.reconnectAttempts = 0;
 				// Lifecycle control (AXS exit JSON) is always a text frame.
 				// Never decode binary frames as exit — ordinary PTY output can
 				// contain the same bytes and must not close the session.
@@ -905,12 +911,17 @@ export default class TerminalComponent {
 					return;
 				}
 
-				this.onDisconnect?.({
+				const info = {
 					intentional: this.intentionalClose,
 					processExited: this.processExited,
 					code: event?.code,
 					reason: event?.reason,
-				});
+				};
+				if (info.intentional || info.processExited) {
+					this.onDisconnect?.(info);
+					return;
+				}
+				void this.reconnectToSession(info);
 			};
 
 			websocket.onerror = (error) => {
@@ -923,13 +934,37 @@ export default class TerminalComponent {
 					return;
 				}
 
-				// Ignore teardown noise from intentional close / already-handled exit
+				// A close event always follows; onclose decides whether to reconnect.
 				if (this.intentionalClose || this.processExited) return;
-
 				console.error("WebSocket error:", error);
-				this.onError?.(error);
 			};
 		});
+	}
+
+	/**
+	 * Re-attach to the same PTY after an unexpected disconnect. The backend
+	 * replays recent output, so the screen is reset before reconnecting.
+	 * @param {object} info - Disconnect details forwarded if reconnecting fails
+	 */
+	async reconnectToSession(info) {
+		if (this.reconnectAttempts >= RECONNECT_DELAYS.length) {
+			this.onDisconnect?.(info);
+			return;
+		}
+		const delay = RECONNECT_DELAYS[this.reconnectAttempts++];
+		await new Promise((resolve) => setTimeout(resolve, delay));
+		if (this.intentionalClose || this.processExited) return;
+
+		try {
+			this.attachAddon?.dispose();
+			this.attachAddon = null;
+			this.terminal.reset();
+			await this.connectToSession(this.pid);
+			if (this.intentionalClose) this.websocket?.close();
+		} catch (error) {
+			console.error(`Failed to reconnect terminal ${this.pid}:`, error);
+			await this.reconnectToSession(info);
+		}
 	}
 
 	/**
