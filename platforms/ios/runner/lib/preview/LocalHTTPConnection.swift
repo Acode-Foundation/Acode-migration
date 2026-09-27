@@ -74,6 +74,22 @@ final class LocalHTTPConnection {
         send(body) { [weak self] in self?.end() }
     }
 
+    /// Sends `101 Switching Protocols` and hands the socket to the new protocol, which owns it from then on.
+    func upgrade(headers: [String: String]) -> NWConnection? {
+        guard !started, !finished else { return nil }
+        started = true
+        finished = true
+        deadline?.cancel()
+        var text = "HTTP/1.1 101 Switching Protocols\r\n"
+        for (name, value) in headers { text += "\(name): \(value)\r\n" }
+        connection.send(content: Data((text + "\r\n").utf8), completion: .contentProcessed { _ in })
+        connection.stateUpdateHandler = nil
+        onClose?()
+        onClose = nil
+        onRequest = nil
+        return connection
+    }
+
     func sendFile(_ file: FileHandle, count: UInt64) {
         guard !finished, !headOnly, count > 0 else { try? file.close(); end(); return }
         do {

@@ -30,19 +30,43 @@ final class AlpineTerminalTests: BridgeTestCase {
                 await new Promise(resolve => setTimeout(resolve, 100));
             }
             if (!ready) throw new Error('AXS not ready');
-            const pid = (await request('/terminals', {cols:80, rows:24})).data.trim();
-            const output = await new Promise((resolve, reject) => {
+            const attach = pid => {
                 const socket = new WebSocket('ws://127.0.0.1:8767/terminals/' + pid);
+                socket.binaryType = 'arraybuffer';
+                const decoder = new TextDecoder();
+                const waiters = [];
                 let text = '';
-                const timeout = setTimeout(() => { socket.close(); reject(new Error('PTY timeout: ' + text)); }, 15000);
-                socket.onopen = () => socket.send("printf 'PTY:%s\\n' \"$((7*8))\"\n");
-                socket.onmessage = async event => {
-                    text += typeof event.data === 'string' ? event.data : await event.data.text();
-                    if (text.includes('PTY:56')) { clearTimeout(timeout); socket.close(); resolve(text); }
+                socket.onmessage = event => {
+                    text += typeof event.data === 'string' ? event.data : decoder.decode(event.data, {stream: true});
+                    for (const waiter of waiters.filter(waiter => text.includes(waiter.token))) waiter.resolve(text);
                 };
-                socket.onerror = () => { clearTimeout(timeout); reject(new Error('PTY connection failed')); };
-            });
-            await request('/terminals/' + pid + '/terminate', {});
+                const opened = new Promise((resolve, reject) => {
+                    socket.onopen = resolve;
+                    socket.onerror = () => reject(new Error('PTY connection failed'));
+                });
+                const expect = token => new Promise((resolve, reject) => {
+                    if (text.includes(token)) { resolve(text); return; }
+                    const timeout = setTimeout(() => reject(new Error('PTY timeout waiting for ' + token + ': ' + text)), 15000);
+                    waiters.push({token, resolve: value => { clearTimeout(timeout); resolve(value); }});
+                });
+                return {socket, opened, expect};
+            };
+            const pid = (await request('/terminals', {cols:80, rows:24})).data.trim();
+            const first = attach(pid);
+            await first.opened;
+            first.socket.send("printf 'PTY:%s\\n' \"$((7*8))\"\n");
+            const output = await first.expect('PTY:56');
+            await request('/terminals/' + pid + '/resize', {cols:100, rows:40});
+            first.socket.send('stty size\n');
+            await first.expect('40 100');
+            first.socket.close();
+            const second = attach(pid);
+            await second.opened;
+            await second.expect('PTY:56');
+            second.socket.send('exit\n');
+            await second.expect('"type":"exit"');
+            const other = (await request('/terminals', {cols:80, rows:24})).data.trim();
+            await request('/terminals/' + other + '/terminate', {});
             const fs = acode.require('fs');
             const directory = 'alpine://localhost/tmp/acode-files-test';
             await Executor.execute('mkdir -p /tmp/acode-files-test', true);

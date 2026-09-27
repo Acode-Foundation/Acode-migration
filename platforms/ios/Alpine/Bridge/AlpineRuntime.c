@@ -11,11 +11,14 @@
 #include "fs/devices.h"
 #include "fs/path.h"
 #include "fs/real.h"
+#include "fs/sockrestart.h"
+#include "AlpineSpawn.h"
 
 extern int fakefs_bind_mount(const char *, const char *, bool);
 extern int do_wait(int, pid_t_, struct siginfo_ *, struct rusage_ *, int);
 static struct task *init_task;
 static AlpineExitCallback on_exit;
+static int attach_descriptors(void *argument);
 static void process_exit(struct task *task, int status);
 static struct fd *host_descriptor(int number);
 static void *failed_process(void *task);
@@ -90,19 +93,23 @@ int alpine_chmod(const char *path, unsigned int mode) {
 }
 
 int alpine_start(const char *command, const char *environment, int input, int output, int error) {
+    int descriptors[] = {input, output, error};
+    return alpine_spawn(command, environment, attach_descriptors, descriptors);
+}
+
+int alpine_spawn(const char *command, const char *environment, int (*attach)(void *), void *argument) {
     current = init_task;
     int result = become_new_init_child();
     if (result < 0) { current = NULL; return result; }
-    int descriptors[] = {input, output, error};
-    for (int index = 0; index < 3; index++) {
-        current->files->files[index] = host_descriptor(descriptors[index]);
+    result = attach(argument);
+    if (result >= 0) {
+        size_t length = strlen(command);
+        char *arguments = calloc(1, length + 14);
+        memcpy(arguments, "/bin/sh\0-c\0", 11);
+        memcpy(arguments + 11, command, length);
+        result = do_execve("/bin/sh", 3, arguments, environment);
+        free(arguments);
     }
-    size_t length = strlen(command);
-    char *arguments = calloc(1, length + 14);
-    memcpy(arguments, "/bin/sh\0-c\0", 11);
-    memcpy(arguments + 11, command, length);
-    result = do_execve("/bin/sh", 3, arguments, environment);
-    free(arguments);
     int pid = current->pid;
     sigset_t wake, previous;
     sigemptyset(&wake);
@@ -183,6 +190,22 @@ int alpine_unmount(void) {
     if (result == 0) result = do_umount("");
     current = NULL;
     return result;
+}
+
+void alpine_suspend(void) {
+    sockrestart_on_suspend();
+}
+
+void alpine_resume(void) {
+    sockrestart_on_resume();
+}
+
+static int attach_descriptors(void *argument) {
+    int *descriptors = argument;
+    for (int index = 0; index < 3; index++) {
+        current->files->files[index] = host_descriptor(descriptors[index]);
+    }
+    return 0;
 }
 
 static void process_exit(struct task *task, int status) {

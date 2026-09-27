@@ -2,9 +2,26 @@
 
 The existing Acode xterm UI connects to the same AXS HTTP/WebSocket API used on
 Android. ARM64 Linux programs run inside ios-linuxkit's interpreter; they are not
-launched as unsigned iOS executables. The native Executor services use guest
-processes and pipes. Apple Network.framework supplies the raw process WebSocket
-transport for `Executor.spawnStream`.
+launched as unsigned iOS executables.
+
+On iOS that API is served by the app, not by AXS inside the guest. Only the
+shells are emulated:
+
+```
+xterm.js ──ws/http──▶ TerminalServer (Swift, 127.0.0.1:8767)
+                         └─ TerminalSession ──▶ Bridge/AlpineTerminal.c ──▶ /dev/pts/N ──▶ bash
+```
+
+`AlpineTerminal.c` registers a tty driver whose output goes straight to Swift
+and whose input, resize and hangup go straight to the guest tty. Terminal I/O
+therefore never uses emulated sockets, epoll or threads, and the guest pty still
+provides job control, termios and `SIGWINCH`. `init-alpine.sh --prepare` runs
+once per boot; each terminal then starts `bash --rcfile /initrc -i` directly.
+The AXS binary stays in the guest as `axs` for users and plugins.
+
+The native Executor services use guest processes and pipes. Apple
+Network.framework supplies the raw process WebSocket transport for
+`Executor.spawnStream`.
 
 ## Sources
 
@@ -55,6 +72,10 @@ SIGUSR1` in Xcode's debug console, then `continue`.
 - `Bridge/AlpineRuntime.c` owns guest init, stdio, process cleanup and mounts.
   SIGUSR1 is unblocked only while creating guest threads, then the host worker's
   signal mask is restored.
+- `Bridge/AlpineTerminal.c` connects guest pseudo-terminals to Swift through
+  `pty_open_fake`, as iSH does for its terminal view.
+- `alpine_suspend`/`alpine_resume` run upstream `sockrestart` when the app moves
+  to the background and back, so guest servers keep their listening sockets.
 
 The guest root lives at `Library/Alpine`, outside every host bind mount. `/public`,
 `/home` and `/root` share Acode's Terminal Public directory. `/acode` maps app data,

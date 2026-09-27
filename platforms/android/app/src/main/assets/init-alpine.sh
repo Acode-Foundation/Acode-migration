@@ -6,6 +6,7 @@ export TERM=xterm-256color
 
 INSTALLING=false
 FAILSAFE=false
+PREPARE=false
 
 # Parse internal flags
 while [ $# -gt 0 ]; do
@@ -16,6 +17,10 @@ while [ $# -gt 0 ]; do
             ;;
         --failsafe)
             FAILSAFE=true
+            shift
+            ;;
+        --prepare)
+            PREPARE=true
             shift
             ;;
         --)
@@ -37,10 +42,13 @@ fi
 required_packages="bash command-not-found tzdata wget"
 missing_packages=""
 
+installed_packages=" $(apk info -e $required_packages 2>/dev/null | tr '\n' ' ') "
+
 for pkg in $required_packages; do
-    if ! apk info -e "$pkg" >/dev/null 2>&1; then
-        missing_packages="$missing_packages $pkg"
-    fi
+    case "$installed_packages" in
+        *" $pkg "*) ;;
+        *) missing_packages="$missing_packages $pkg" ;;
+    esac
 done
 
 if [ -n "$missing_packages" ]; then
@@ -289,24 +297,27 @@ _acode_preexec() {
     check_binary_execution "$cmd"
 }
 
-# Preserve any existing DEBUG trap and append our handler instead of overwriting it.
-# This avoids clobbering user-installed preexec hooks (starship, fzf, bash-preexec, etc.).
-__acode_existing_debug_trap="$(trap -p DEBUG 2>/dev/null)"
-if [[ -n "${__acode_existing_debug_trap}" ]]; then
-    __acode_existing_cmd="$(printf "%s" "${__acode_existing_debug_trap}" | sed -E "s/.*'((.*)?)'.*/\1/")"
-else
-    __acode_existing_cmd=""
-fi
-
-# Only add our handler if it's not already present
-if [[ "${__acode_existing_cmd}" != *"_acode_preexec"* ]]; then
-    if [[ -n "${__acode_existing_cmd}" ]]; then
-        trap "${__acode_existing_cmd}; _acode_preexec" DEBUG
+# Only Android storage needs the check; it costs two subshells per command.
+if [ -d /sdcard ] || [ -d /storage ]; then
+    # Preserve any existing DEBUG trap and append our handler instead of overwriting it.
+    # This avoids clobbering user-installed preexec hooks (starship, fzf, bash-preexec, etc.).
+    __acode_existing_debug_trap="$(trap -p DEBUG 2>/dev/null)"
+    if [[ -n "${__acode_existing_debug_trap}" ]]; then
+        __acode_existing_cmd="$(printf "%s" "${__acode_existing_debug_trap}" | sed -E "s/.*'((.*)?)'.*/\1/")"
     else
-        trap '_acode_preexec' DEBUG
+        __acode_existing_cmd=""
     fi
+
+    # Only add our handler if it's not already present
+    if [[ "${__acode_existing_cmd}" != *"_acode_preexec"* ]]; then
+        if [[ -n "${__acode_existing_cmd}" ]]; then
+            trap "${__acode_existing_cmd}; _acode_preexec" DEBUG
+        else
+            trap '_acode_preexec' DEBUG
+        fi
+    fi
+    unset __acode_existing_debug_trap __acode_existing_cmd
 fi
-unset __acode_existing_debug_trap __acode_existing_cmd
 
 # Command-not-found handler
 command_not_found_handle() {
@@ -352,7 +363,8 @@ fi
 
 chmod +x "$ALPINE_ROOT/initrc"
 
-if [ "$FAILSAFE" != true ]; then
+# --prepare only sets up the environment; the caller serves the terminals
+if [ "$FAILSAFE" != true ] && [ "$PREPARE" != true ]; then
     #everytime a terminal is started initrc will run
     "$PREFIX/axs" -c "bash --rcfile /initrc -i"
 fi
