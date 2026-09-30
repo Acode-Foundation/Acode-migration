@@ -36,12 +36,12 @@ interface Sftp {
 	/**
 	 * Executes command on ssh-server
 	 * @param command
-	 * @param onSucess
+	 * @param onSuccess
 	 * @param onFail
 	 */
 	exec(
 		command: String,
-		onSucess: (res: ExecResult) => void,
+		onSuccess: (res: ExecResult) => void,
 		onFail: (err: any) => void,
 	): void;
 	/** Connects using credentials held by the native profile store. */
@@ -135,7 +135,7 @@ interface Sftp {
 	close(onSuccess: () => void, onFail: (err: any) => void): void;
 
 	/**
-	 * Gets wether server is connected or not.
+	 * Gets whether server is connected or not.
 	 * @param onSuccess
 	 * @param onFail
 	 */

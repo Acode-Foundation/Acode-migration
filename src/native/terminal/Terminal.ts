@@ -135,10 +135,10 @@ const Terminal = {
 		const isFdroid = await Executor.execute("echo $FDROID");
 		this.lastInstallError = "";
 		try {
-			//cleanup before insatll
+			//cleanup before install
 			await this.uninstall();
 		} catch (e) {
-			//supress error
+			//suppress error
 		}
 		const filesDir = await new Promise<string>((resolve, reject) => {
 			system.getFilesDir(resolve, reject);
@@ -313,7 +313,7 @@ const Terminal = {
 			);
 			logger("✅  Extraction complete");
 			await ensureDir(`${filesDir}/.extracted`);
-			logger("⚙️  Updating sandbox enviroment...");
+			logger("⚙️  Updating sandbox environment...");
 			const installResult = await this.startAxs(true, logger, errorLogger);
 			if (!installResult) {
 				throw new Error(
