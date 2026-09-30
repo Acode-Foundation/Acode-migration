@@ -153,7 +153,10 @@ async function onDeviceReady() {
 	window.addedFolder = addedFolder;
 	window.editorManager = null;
 	window.toast = toast;
-	window.ASSETS_DIRECTORY = Url.join(Bridge.file.applicationDirectory, "bundle");
+	window.ASSETS_DIRECTORY = Url.join(
+		Bridge.file.applicationDirectory,
+		"bundle",
+	);
 	window.DATA_STORAGE = await resolveStorageDir(
 		externalDataDirectory,
 		dataDirectory,
