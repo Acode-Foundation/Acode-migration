@@ -41,6 +41,7 @@ import androidx.core.graphics.drawable.IconCompat;
 import androidx.documentfile.provider.DocumentFile;
 import com.foxdebug.acode.BuildConfig;
 import java.io.BufferedReader;
+import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -62,6 +63,11 @@ import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.util.*;
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
+import org.apache.commons.compress.compressors.CompressorException;
+import org.apache.commons.compress.compressors.CompressorStreamFactory;
+import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream;
 import com.foxdebug.acode.runtime.BridgeContext;
 import com.foxdebug.acode.runtime.Callback;
 import com.foxdebug.acode.runtime.Service;
@@ -173,6 +179,7 @@ public class System extends Service {
       case "compare-file-text":
       case "compare-texts":
       case "extractAsset":
+      case "extractTarXz":
       case "pin-file-shortcut":
         break;
       case "get-configuration":
@@ -433,6 +440,17 @@ public class System extends Service {
               } catch (Exception e) {
                 callbackContext.error(
                   "Failed to extract asset: " + e.getMessage()
+                );
+              }
+              return;
+            case "extractTarXz":
+              try {
+                String sourcePath = args.getString(0);
+                String destinationPath = args.getString(1);
+                extractTarXz(sourcePath, destinationPath, callbackContext);
+              } catch (Exception e) {
+                callbackContext.error(
+                  "Failed to extract tar.xz: " + e.getMessage()
                 );
               }
               return;
@@ -2415,6 +2433,115 @@ public class System extends Service {
       out.flush();
       callback.success();
     } catch (IOException e) {
+      StringWriter sw = new StringWriter();
+      e.printStackTrace(new PrintWriter(sw));
+      callback.error(sw.toString());
+    }
+  }
+
+  private InputStream openCompressor(File source) throws Exception {
+    String name = source.getName().toLowerCase();
+    if (name.endsWith(".tar.gz") || name.endsWith(".tgz")) {
+      return new GzipCompressorInputStream(
+        new BufferedInputStream(new FileInputStream(source))
+      );
+    } else if (name.endsWith(".tar.xz") || name.endsWith(".txz")) {
+      return new CompressorStreamFactory()
+        .createCompressorInputStream(
+          CompressorStreamFactory.XZ,
+          new FileInputStream(source)
+        );
+    }
+    try {
+      return new CompressorStreamFactory()
+        .createCompressorInputStream(
+          new BufferedInputStream(new FileInputStream(source))
+        );
+    } catch (CompressorException e) {
+      // Uncompressed tar archives have no compressor signature; read them as-is.
+      return new BufferedInputStream(new FileInputStream(source));
+    }
+  }
+
+  private void setRwx(File file) {
+    file.setReadable(true, false);
+    file.setWritable(true, false);
+    file.setExecutable(true, false);
+  }
+
+  private void extractTarXz(
+    String sourcePath,
+    String destinationPath,
+    Callback callback
+  ) {
+    try {
+      File sourceFile = new File(sourcePath);
+      File destDir = new File(destinationPath);
+      if (!destDir.exists()) {
+        destDir.mkdirs();
+      }
+      setRwx(destDir);
+
+      try (
+        InputStream compIn = openCompressor(sourceFile);
+        TarArchiveInputStream tarIn = new TarArchiveInputStream(compIn)
+      ) {
+        String canonicalDest = destDir.getCanonicalPath();
+        TarArchiveEntry entry;
+        while ((entry = tarIn.getNextEntry()) != null) {
+          File entryFile = new File(canonicalDest, entry.getName());
+          String canonicalEntry = entryFile.getCanonicalPath();
+          if (
+            !canonicalEntry.startsWith(canonicalDest + File.separator) &&
+            !canonicalEntry.equals(canonicalDest)
+          ) {
+            callback.error(
+              "Path traversal detected in tar entry: " + entry.getName()
+            );
+            return;
+          }
+
+          if (entry.isDirectory()) {
+            entryFile.mkdirs();
+            setRwx(entryFile);
+          } else if (
+            (entry.isSymbolicLink() || entry.isLink()) &&
+            entry.getLinkName() != null &&
+            !entry.getLinkName().isEmpty()
+          ) {
+            File parent = entryFile.getParentFile();
+            if (!parent.exists()) {
+              parent.mkdirs();
+              setRwx(parent);
+            }
+            if (entryFile.exists()) {
+              entryFile.delete();
+            }
+            Files.createSymbolicLink(
+              entryFile.toPath(),
+              Paths.get(entry.getLinkName())
+            );
+          } else {
+            File parent = entryFile.getParentFile();
+            if (!parent.exists()) {
+              parent.mkdirs();
+              setRwx(parent);
+            }
+
+            try (OutputStream out = new FileOutputStream(entryFile)) {
+              byte[] buffer = new byte[8192];
+              int length;
+              while ((length = tarIn.read(buffer)) != -1) {
+                out.write(buffer, 0, length);
+              }
+              out.flush();
+            }
+            setRwx(entryFile);
+          }
+        }
+        callback.success();
+      }
+    } catch (Exception e) {
       StringWriter sw = new StringWriter();
       e.printStackTrace(new PrintWriter(sw));
       callback.error(sw.toString());

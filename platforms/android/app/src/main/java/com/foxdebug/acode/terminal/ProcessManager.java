@@ -22,11 +22,11 @@ public class ProcessManager {
     /**
      * Creates a ProcessBuilder with common environment setup
      */
-    public ProcessBuilder createProcessBuilder(String cmd, boolean useAlpine) {
-        if (useAlpine) {
+    public ProcessBuilder createProcessBuilder(String cmd, boolean useUbuntu) {
+        if (useUbuntu) {
             refreshAxsSymlink();
         }
-        String xcmd = useAlpine ? "source $PREFIX/init-sandbox.sh " + cmd : cmd;
+        String xcmd = useUbuntu ? "source $PREFIX/init-sandbox.sh " + cmd : cmd;
         ProcessBuilder builder = new ProcessBuilder("sh", "-c", xcmd);
         setupEnvironment(builder.environment());
         return builder;
@@ -112,8 +112,8 @@ public class ProcessManager {
     /**
      * Executes a command and returns the result
      */
-    public ExecResult executeCommand(String cmd, boolean useAlpine) throws Exception {
-        ProcessBuilder builder = createProcessBuilder(cmd, useAlpine);
+    public ExecResult executeCommand(String cmd, boolean useUbuntu) throws Exception {
+        ProcessBuilder builder = createProcessBuilder(cmd, useUbuntu);
         Process process = builder.start();
         
         String stdout = readStream(process.getInputStream());

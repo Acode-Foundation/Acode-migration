@@ -95,6 +95,14 @@ const api = {
 	) {
 		exec(success, error, "extractAsset", [assetName, destinationPath]);
 	},
+	extractTarXz(
+		sourcePath: string,
+		destinationPath: string,
+		success: NativeCallback,
+		error: NativeCallback,
+	) {
+		exec(success, error, "extractTarXz", [sourcePath, destinationPath]);
+	},
 	getParentPath(path: string, success: NativeCallback, error: NativeCallback) {
 		exec(success, error, "getParentPath", [path]);
 	},
