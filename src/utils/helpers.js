@@ -216,26 +216,27 @@ export default {
 			}
 		}
 
-		/**@type {string[]} */
 		const storageList = this.parseJSON(localStorage.storageList);
-		if (!Array.isArray(storageList)) return url;
-		const storageListLen = storageList.length;
+		const storages = [
+			...(Array.isArray(storageList) ? storageList : []),
+			...getBuiltinStorages(),
+		];
+		let match = null;
 
-		for (let i = 0; i < storageListLen; ++i) {
-			const uuid = storageList[i];
-			let storageUrl = Url.parse(uuid.uri || uuid.url || "").url;
+		for (const storage of storages) {
+			let storageUrl = Url.parse(storage.uri || storage.url || "").url;
 			if (!storageUrl) continue;
 			if (storageUrl.endsWith("/")) {
 				storageUrl = storageUrl.slice(0, -1);
 			}
-			const regex = new RegExp("^" + escapeStringRegexp(storageUrl));
-			if (regex.test(url)) {
-				url = url.replace(regex, uuid.name);
-				break;
+			if (!url.startsWith(storageUrl)) continue;
+			// Prefer the deepest root so a storage added inside a built-in one keeps its own name.
+			if (!match || storageUrl.length > match.url.length) {
+				match = { name: storage.name, url: storageUrl };
 			}
 		}
 
-		return url;
+		return match ? match.name + url.slice(match.url.length) : url;
 	},
 	/**
 	 * Updates uri of all active which matches the oldUrl as location
@@ -529,3 +530,18 @@ export default {
 		);
 	},
 };
+
+/**
+ * App-managed roots that the file browser lists but never saves to `localStorage.storageList`.
+ */
+function getBuiltinStorages() {
+	const { dataDirectory, documentsDirectory } = globalThis.Bridge?.file ?? {};
+	const storages = [];
+	if (dataDirectory) {
+		storages.push({ name: "Terminal Public", url: `${dataDirectory}public` });
+	}
+	if (documentsDirectory) {
+		storages.push({ name: "Acode", url: documentsDirectory });
+	}
+	return storages;
+}

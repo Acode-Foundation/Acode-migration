@@ -10,6 +10,7 @@ import { getServerStats } from "cm/lsp/serverLauncher";
 import toast from "components/toast";
 import actionStack from "lib/actionStack";
 import restoreTheme from "lib/restoreTheme";
+import helpers from "utils/helpers";
 
 let dialogInstance = null;
 
@@ -395,7 +396,9 @@ function showLspInfoDialog() {
 					<div className="lsp-section">
 						<div className="lsp-section-label">Project</div>
 						<div className="lsp-project-path">
-							{clientState?.rootUri || "(workspace folders mode)"}
+							{clientState?.rootUri
+								? helpers.getVirtualPath(clientState.rootUri)
+								: "(workspace folders mode)"}
 						</div>
 					</div>
 				)}
