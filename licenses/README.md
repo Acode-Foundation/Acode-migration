@@ -14,3 +14,5 @@ renamed to match their current source locations.
 The HTTP MIT license is preserved from the [upstream license](https://github.com/silkimen/cordova-plugin-advanced-http/blob/master/LICENSE).
 
 The iOS Alpine runtime has separate GPL licensing and retained upstream sources. See [the runtime provenance](../platforms/ios/Alpine/README.md) and its GPL and libarchive license texts.
+
+The Android PRoot compatibility layer is compiled from the in-tree sources under [`platforms/android/proot`](../platforms/android/proot/README.md). PRoot is GPL-2.0-or-later and the bundled Samba talloc is LGPL-3.0-or-later; see [proot-LICENSE](proot-LICENSE) and [talloc-LICENSE](talloc-LICENSE).

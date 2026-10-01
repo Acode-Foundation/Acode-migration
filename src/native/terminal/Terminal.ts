@@ -151,17 +151,14 @@ const Terminal = {
 				"arm64-v8a": {
 					libraryDirectory: "arm64",
 					axsArchitecture: "arm64",
-					hasLibproot32: true,
 				},
 				"armeabi-v7a": {
 					libraryDirectory: "arm32",
 					axsArchitecture: "armv7",
-					hasLibproot32: false,
 				},
 				x86_64: {
 					libraryDirectory: "x64",
 					axsArchitecture: "x86_64",
-					hasLibproot32: true,
 				},
 			};
 			const architecture = architectures[arch as keyof typeof architectures];
@@ -172,28 +169,12 @@ const Terminal = {
 				const buildUrl = (...parts: string[]) => parts.join("");
 				const strings = {
 					protocol: ["ht", "tps", ":", "//"],
-					rawGithubDomain: ["raw", ".", "github", "usercontent", ".", "com"],
 					githubDomain: ["git", "hub", ".", "com"],
 					acodeFoundation: ["Acode", "-", "Foundation"],
 					acodeRepo: ["A", "code"],
 					bajrangCoder: ["bajrang", "Coder"],
 					acodexServer: ["acodex", "_", "server"],
-					libraries: {
-						proot: ["li", "bp", "root", ".", "so"],
-						proot32: ["li", "bp", "root", "32", ".", "so"],
-						talloc: ["li", "bt", "alloc", ".", "so"],
-						prootXed: ["li", "bp", "root", "-", "xed", ".", "so"],
-					},
 				};
-				const rawGithubBase = buildUrl(
-					...strings.protocol,
-					...strings.rawGithubDomain,
-					"/",
-					...strings.acodeFoundation,
-					"/",
-					...strings.acodeRepo,
-					"/main/src/plugins/proot/libs/",
-				);
 				const githubReleaseBase = buildUrl(
 					...strings.protocol,
 					...strings.githubDomain,
@@ -203,20 +184,6 @@ const Terminal = {
 					...strings.acodexServer,
 					"/releases/latest/download/",
 				);
-				const libraryBaseUrl = buildUrl(
-					rawGithubBase,
-					architecture.libraryDirectory,
-					"/",
-				);
-				const libproot = buildUrl(libraryBaseUrl, ...strings.libraries.proot);
-				const libTalloc = buildUrl(libraryBaseUrl, ...strings.libraries.talloc);
-				const prootUrl = buildUrl(
-					libraryBaseUrl,
-					...strings.libraries.prootXed,
-				);
-				const libproot32 = architecture.hasLibproot32
-					? buildUrl(libraryBaseUrl, ...strings.libraries.proot32)
-					: null;
 				const axsUrl = buildUrl(
 					githubReleaseBase,
 					"axs-pie-android-",
@@ -241,32 +208,6 @@ const Terminal = {
 				);
 				logger("⬇️  Downloading axs...");
 				await downloadFile(axsUrl, file.dataDirectory + "axs", "AXS");
-				logger("⬇️  Downloading compatibility layer...");
-				await downloadFile(
-					prootUrl,
-					file.dataDirectory + "libproot-xed.so",
-					"Compatibility layer",
-				);
-				logger("⬇️  Downloading supporting library...");
-				await downloadFile(
-					libTalloc,
-					file.dataDirectory + "libtalloc.so.2",
-					"Supporting library",
-				);
-				if (libproot != null) {
-					await downloadFile(
-						libproot,
-						file.dataDirectory + "libproot.so",
-						"proot loader",
-					);
-				}
-				if (libproot32 != null) {
-					await downloadFile(
-						libproot32,
-						file.dataDirectory + "libproot32.so",
-						"32-bit proot loader",
-					);
-				}
 				logger("✅  All downloads completed");
 			} else {
 				logger("📦  Extracting assets...");
@@ -423,9 +364,6 @@ const Terminal = {
 			const cmd = `
             set -e
             INCLUDE_FILES="ubuntu .downloaded .extracted .configured axs"
-            if [ "$FDROID" = "true" ]; then
-                INCLUDE_FILES="$INCLUDE_FILES libtalloc.so.2 libproot-xed.so"
-            fi
             EXCLUDE="--exclude=ubuntu/data --exclude=ubuntu/system --exclude=ubuntu/vendor --exclude=ubuntu/sdcard --exclude=ubuntu/storage --exclude=ubuntu/public --exclude=ubuntu/apex --exclude=ubuntu/odm --exclude=ubuntu/product --exclude=ubuntu/system_ext --exclude=ubuntu/linkerconfig --exclude=ubuntu/proc --exclude=ubuntu/sys --exclude=ubuntu/dev --exclude=ubuntu/run --exclude=ubuntu/tmp"
             tar -cf "$PREFIX/aterm_backup.tar" -C "$PREFIX" $EXCLUDE $INCLUDE_FILES
             echo "ok"
@@ -530,10 +468,6 @@ const Terminal = {
 
         INCLUDE_FILES="$PREFIX/ubuntu $PREFIX/.downloaded $PREFIX/.extracted $PREFIX/.configured $PREFIX/axs"
 
-        if [ "$FDROID" = "true" ]; then
-            INCLUDE_FILES="$INCLUDE_FILES $PREFIX/libtalloc.so.2 $PREFIX/libproot-xed.so"
-        fi
-
         for item in $INCLUDE_FILES; do
             rm -rf -- "$item"
         done
@@ -589,11 +523,7 @@ const Terminal = {
 			const cmd = `
             set -e
 
-            INCLUDE_FILES="$PREFIX/ubuntu $PREFIX/.downloaded $PREFIX/.extracted $PREFIX/.configured $PREFIX/axs"
-
-            if [ "$FDROID" = "true" ]; then
-                INCLUDE_FILES="$INCLUDE_FILES $PREFIX/libtalloc.so.2 $PREFIX/libproot-xed.so"
-            fi
+            INCLUDE_FILES="$PREFIX/ubuntu $PREFIX/.downloaded $PREFIX/.extracted $PREFIX/.configured $PREFIX/axs $PREFIX/libtalloc.so.2 $PREFIX/libproot-xed.so $PREFIX/libproot.so $PREFIX/libproot32.so"
 
             for item in $INCLUDE_FILES; do
                 rm -rf -- "$item"

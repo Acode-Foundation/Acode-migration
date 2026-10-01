@@ -363,7 +363,7 @@ function extractProcessName(command, fallbackName) {
 		"linker64",
 		"linker32",
 		"linker",
-		"libproot-xed.so",
+		"libproot.so",
 		"proot",
 		"axs",
 		"system/bin/linker64",

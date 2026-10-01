@@ -342,7 +342,8 @@ their file URIs; parsing them as URL text loses literal filename characters.
 
 - `platforms/android/app/src/main/java`: Acode runtime and shared native services.
 - `platforms/android/app/src/free`: advertising implementation and metadata.
-- `platforms/android/app/src/store`: billing and proot assets, excluded by `fdroid`.
+- `platforms/android/app/src/store`: billing, the AXS binary and sandbox rootfs assets, excluded by `fdroid`.
+- `platforms/android/proot`: PRoot and its loaders, compiled from the in-tree C sources with the NDK for every flavor.
 - `src/native`: typed native APIs imported by `src/native/index.ts`; `bridge(service)` binds promise-based actions to the shared transport.
 - `src/platforms/android` and `src/platforms/ios`: platform transports using the shared callback and binary protocol.
 - `platforms/ios`: iOS app, with the template's runtime in `runner` and native services in `runner/lib`. Simulator tests and native dependencies remain alongside the app. See the [port checklist](docs/ios-port.md) for remaining work.
@@ -371,7 +372,7 @@ Gradle only compiles native source and packages the compiled web assets; no Java
 Paid builds exclude the AdMob native sources, Google ads/consent SDKs, manifest entries,
 and JavaScript bridge. The editor uses small inactive ads APIs in paid builds, so
 AdMob initialization, consent and rewarded-ad implementation are not bundled either.
-Shared billing and proot remain available unless `fdroid` is requested.
+Shared billing remains available unless `fdroid` is requested; PRoot is compiled from source for every flavor.
 
 ```bash
 npm run build -- dev apk

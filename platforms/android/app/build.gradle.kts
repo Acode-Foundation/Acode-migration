@@ -123,6 +123,7 @@ dependencies {
     implementation(libs.nanohttpd)
     implementation(libs.okhttp)
     implementation(libs.xz)
+    implementation(project(":proot"))
 
     //check product flavours
     "freeImplementation"(libs.play.services.ads)
