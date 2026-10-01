@@ -36,6 +36,12 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
+# glibc resolves "localhost" through /etc/hosts (nsswitch uses `files dns`);
+# the Ubuntu rootfs ships an empty file, so populate it once.
+if [ ! -s /etc/hosts ]; then
+    printf '127.0.0.1\tlocalhost\n::1\t\tlocalhost\n' > /etc/hosts
+fi
+
 # ============================================================
 # Execute supplied command directly (VERY IMPORTANT)
 # ============================================================
@@ -127,6 +133,26 @@ register_android_groups() {
 }
 
 # ============================================================
+# Timezone
+#
+# /etc/localtime can only link a zone file once tzdata provides one. Re-run on
+# every launch so a tzdata install that happens later is picked up.
+# ============================================================
+
+sync_timezone() {
+    local zone
+
+    [ -e /etc/localtime ] && return 0
+    [ -r /etc/timezone ] || return 0
+
+    zone="$(cat /etc/timezone 2>/dev/null)"
+    [ -n "$zone" ] || return 0
+    [ -f "/usr/share/zoneinfo/$zone" ] || return 0
+
+    ln -sf "/usr/share/zoneinfo/$zone" /etc/localtime
+}
+
+# ============================================================
 # One-time rootfs installation
 #
 # IMPORTANT:
@@ -139,27 +165,31 @@ if [ "$INSTALLING" = true ]; then
     echo "[*] Configuring rootfs..."
 
     # --------------------------------------------------------
-    # Configure timezone before tzdata is installed.
+    # Configure timezone. /etc/localtime is linked by sync_timezone() once
+    # tzdata actually provides the zone file.
     # --------------------------------------------------------
 
-    if [ -n "$ANDROID_TZ" ] &&
-       [ -f "/usr/share/zoneinfo/$ANDROID_TZ" ]; then
+    mkdir -p /etc
 
-        mkdir -p /etc
-
-        ln -sf \
-            "/usr/share/zoneinfo/$ANDROID_TZ" \
-            /etc/localtime
-
+    if [ -n "$ANDROID_TZ" ]; then
         echo "$ANDROID_TZ" > /etc/timezone
-
         echo "[+] Timezone: $ANDROID_TZ"
     else
-        ln -sf /usr/share/zoneinfo/UTC /etc/localtime
         echo "Etc/UTC" > /etc/timezone
-
         echo "[+] Timezone: UTC"
     fi
+
+    # The rootfs ships no tzdata, so /etc/localtime cannot resolve until it is
+    # installed. Best effort and time-bounded so an offline install still works.
+    if [ ! -d /usr/share/zoneinfo ]; then
+        APT_TIMEOUT=""
+        command -v timeout >/dev/null 2>&1 && APT_TIMEOUT="timeout 60"
+
+        $APT_TIMEOUT apt-get update >/dev/null 2>&1 || true
+        $APT_TIMEOUT apt-get install -y tzdata >/dev/null 2>&1 || true
+    fi
+
+    sync_timezone
 
     # --------------------------------------------------------
     # Rootfs filesystem setup
@@ -525,6 +555,7 @@ fi
 # Runs on every launch too, so existing rootfs installs pick up new GIDs (and
 # any group Android grants later) without reinstalling the sandbox.
 register_android_groups
+sync_timezone
 
 # AXS splits the `-c` string on whitespace and resolves the FIRST token as the
 # program (src/terminal/handlers.rs: cmd.split_whitespace()). A leading `exec`

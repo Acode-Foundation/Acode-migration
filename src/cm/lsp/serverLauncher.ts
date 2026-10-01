@@ -5,6 +5,7 @@ import loader from "dialogs/loader";
 import { buildShellArchCase } from "./installerUtils";
 import {
   formatCommand,
+  prepareAptCommand,
   quoteArg,
   runForegroundCommand,
   runQuickCommand,
@@ -91,13 +92,13 @@ export { formatCommand } from "./installRuntime";
 let cachedFilesDir: string | null = null;
 
 /**
- * Get candidate Terminal data directories from system.getFilesDir().
- * Newer Terminal builds keep shared runtime state in public. Older builds used
- * ubuntu/home, and some installs keep it as a symlink for shell compatibility.
+ * Get the Terminal runtime data directory from system.getFilesDir(). /home and
+ * /root are bind mounts of public inside the sandbox, so public is the only
+ * place runtime state is written.
  */
-async function getTerminalDataDirs(): Promise<string[]> {
+async function getTerminalDataDir(): Promise<string> {
   if (cachedFilesDir) {
-    return [`${cachedFilesDir}/public`, `${cachedFilesDir}/ubuntu/home`];
+    return `${cachedFilesDir}/public`;
   }
 
   const system = (
@@ -119,7 +120,7 @@ async function getTerminalDataDirs(): Promise<string[]> {
     system.getFilesDir(
       (filesDir: string) => {
         cachedFilesDir = filesDir;
-        resolve([`${filesDir}/public`, `${filesDir}/ubuntu/home`]);
+        resolve(`${filesDir}/public`);
       },
       (error: string) => reject(new Error(error)),
     );
@@ -130,16 +131,14 @@ async function getTerminalDataDirs(): Promise<string[]> {
  * Get the port file path for a given server and session.
  * Port file format: ~/.axs/lsp_ports/{serverName}_{session}
  */
-async function getPortFilePaths(
+async function getPortFilePath(
   serverName: string,
   session: string,
-): Promise<string[]> {
-  const dataDirs = await getTerminalDataDirs();
+): Promise<string> {
+  const dataDir = await getTerminalDataDir();
   // Use just the binary name (not full path), mirroring axs behavior
   const baseName = serverName.split("/").pop() || serverName;
-  return dataDirs.map(
-    (dataDir) => `file://${dataDir}/.axs/lsp_ports/${baseName}_${session}`,
-  );
+  return `file://${dataDir}/.axs/lsp_ports/${baseName}_${session}`;
 }
 
 /**
@@ -183,13 +182,10 @@ export async function getLspPort(
   session: string,
 ): Promise<PortInfo | null> {
   try {
-    const filePaths = await getPortFilePaths(serverName, session);
-
-    for (const filePath of filePaths) {
-      const port = await readPortFromFile(filePath);
-      if (port !== null) {
-        return { port, filePath, session };
-      }
+    const filePath = await getPortFilePath(serverName, session);
+    const port = await readPortFromFile(filePath);
+    if (port !== null) {
+      return { port, filePath, session };
     }
 
     return null;
@@ -498,13 +494,17 @@ function buildInstallCommand(
   switch (spec.kind) {
     case "apt":
       return spec.packages.length
-        ? `apt-get install -y ${spec.packages.map((entry) => quoteArg(entry)).join(" ")}`
+        ? prepareAptCommand(
+            `apt-get install -y ${spec.packages.map((entry) => quoteArg(entry)).join(" ")}`,
+          )
         : null;
     case "npm": {
       if (!spec.packages.length) return null;
       const npmCommand = spec.npmCommand || "npm";
       const installFlags = spec.global !== false ? "install -g" : "install";
-      return `apt-get install -y nodejs npm && ${npmCommand} ${installFlags} ${spec.packages.map((entry) => quoteArg(entry)).join(" ")}`;
+      return prepareAptCommand(
+        `apt-get install -y nodejs npm && ${npmCommand} ${installFlags} ${spec.packages.map((entry) => quoteArg(entry)).join(" ")}`,
+      );
     }
     case "pip": {
       if (!spec.packages.length) return null;
@@ -513,11 +513,15 @@ function buildInstallCommand(
         spec.breakSystemPackages !== false
           ? "PIP_BREAK_SYSTEM_PACKAGES=1 "
           : "";
-      return `apt-get install -y python3 python3-pip && ${breakPackages}${pipCommand} install ${spec.packages.map((entry) => quoteArg(entry)).join(" ")}`;
+      return prepareAptCommand(
+        `apt-get install -y python3 python3-pip && ${breakPackages}${pipCommand} install ${spec.packages.map((entry) => quoteArg(entry)).join(" ")}`,
+      );
     }
     case "cargo":
       return spec.packages.length
-        ? `apt-get install -y cargo && cargo install ${spec.packages.map((entry) => quoteArg(entry)).join(" ")}`
+        ? prepareAptCommand(
+            `apt-get install -y cargo && cargo install ${spec.packages.map((entry) => quoteArg(entry)).join(" ")}`,
+          )
         : null;
     case "github-release": {
       if (!spec.repo || !spec.binaryPath) return null;
@@ -529,10 +533,14 @@ function buildInstallCommand(
       const downloadUrl = `https://github.com/${spec.repo}/releases/latest/download/$ASSET`;
 
       if (spec.archiveType === "binary") {
-        return `apt-get install -y curl && ARCH="$(uname -m)" && case "$ARCH" in\n${caseLines}\n\t*) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;;\nesac && TMP_DIR="$(mktemp -d)" && cleanup() { rm -rf "$TMP_DIR"; } && trap cleanup EXIT && curl -fsSL "${downloadUrl}" -o ${archivePath} && install -Dm755 ${archivePath} ${installTarget}`;
+        return prepareAptCommand(
+          `apt-get install -y curl && ARCH="$(uname -m)" && case "$ARCH" in\n${caseLines}\n\t*) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;;\nesac && TMP_DIR="$(mktemp -d)" && cleanup() { rm -rf "$TMP_DIR"; } && trap cleanup EXIT && curl -fsSL "${downloadUrl}" -o ${archivePath} && install -Dm755 ${archivePath} ${installTarget}`,
+        );
       }
 
-      return `apt-get install -y curl unzip && ARCH="$(uname -m)" && case "$ARCH" in\n${caseLines}\n\t*) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;;\nesac && TMP_DIR="$(mktemp -d)" && cleanup() { rm -rf "$TMP_DIR"; } && trap cleanup EXIT && curl -fsSL "${downloadUrl}" -o ${archivePath} && unzip -oq ${archivePath} -d "$TMP_DIR" && install -Dm755 "$TMP_DIR"/${extractedFile} ${installTarget}`;
+      return prepareAptCommand(
+        `apt-get install -y curl unzip && ARCH="$(uname -m)" && case "$ARCH" in\n${caseLines}\n\t*) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;;\nesac && TMP_DIR="$(mktemp -d)" && cleanup() { rm -rf "$TMP_DIR"; } && trap cleanup EXIT && curl -fsSL "${downloadUrl}" -o ${archivePath} && unzip -oq ${archivePath} -d "$TMP_DIR" && install -Dm755 "$TMP_DIR"/${extractedFile} ${installTarget}`,
+      );
     }
     case "manual":
       return null;

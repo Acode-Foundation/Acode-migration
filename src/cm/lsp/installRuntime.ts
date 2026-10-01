@@ -18,6 +18,15 @@ export function quoteArg(value: unknown): string {
 	return `'${str.replace(/'/g, "'\\''")}'`;
 }
 
+/**
+ * The bundled Ubuntu rootfs ships an empty /var/lib/apt/lists, so every apt
+ * install has to refresh the package lists first. debconf front-ends must stay
+ * non-interactive because a prompt (tzdata) would block the install.
+ */
+export function prepareAptCommand(command: string): string {
+	return `export DEBIAN_FRONTEND=noninteractive\napt-get update\n${command}`;
+}
+
 export function formatCommand(
 	command: string | string[] | null | undefined,
 ): string {

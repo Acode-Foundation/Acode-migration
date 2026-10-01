@@ -24,6 +24,8 @@ import android.provider.DocumentsContract;
 import android.provider.MediaStore;
 import android.provider.Settings;
 import android.provider.Settings.Global;
+import android.system.ErrnoException;
+import android.system.Os;
 import android.util.Base64;
 import android.util.Log;
 import android.util.TypedValue;
@@ -60,6 +62,7 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.util.*;
@@ -2463,10 +2466,61 @@ public class System extends Service {
     }
   }
 
-  private void setRwx(File file) {
-    file.setReadable(true, false);
-    file.setWritable(true, false);
-    file.setExecutable(true, false);
+  private void applyMode(File file, int mode) {
+    int permissions = mode & 07777;
+    if (permissions == 0) return;
+    try {
+      Os.chmod(file.getAbsolutePath(), permissions);
+    } catch (ErrnoException e) {
+      Log.w(
+        TAG,
+        "Can't apply mode " +
+        Integer.toOctalString(permissions) +
+        " to " +
+        file.getPath()
+      );
+    }
+  }
+
+  /**
+   * Recreates a tar hard link as an independent copy. A hard-link entry has no
+   * payload and its name is relative to the archive root, not to the link's own
+   * directory. Android storage does not reliably support link(2) for app files,
+   * so the already extracted target is copied instead.
+   */
+  private boolean extractHardLink(
+    String canonicalDest,
+    File linkFile,
+    String linkName,
+    int mode
+  ) {
+    try {
+      File target = new File(canonicalDest, linkName.replaceFirst("^/+", ""));
+      String canonicalTarget = target.getCanonicalPath();
+      if (
+        !canonicalTarget.startsWith(canonicalDest + File.separator) ||
+        !target.exists() ||
+        target.isDirectory()
+      ) {
+        return false;
+      }
+
+      File parent = linkFile.getParentFile();
+      if (parent != null && !parent.exists()) {
+        parent.mkdirs();
+      }
+
+      Files.copy(
+        target.toPath(),
+        linkFile.toPath(),
+        StandardCopyOption.REPLACE_EXISTING
+      );
+      applyMode(linkFile, mode);
+      return true;
+    } catch (IOException e) {
+      Log.w(TAG, "Can't recreate hard link " + linkFile.getPath());
+      return false;
+    }
   }
 
   private void extractTarXz(
@@ -2480,7 +2534,8 @@ public class System extends Service {
       if (!destDir.exists()) {
         destDir.mkdirs();
       }
-      setRwx(destDir);
+
+      Map<File, Integer> directoryModes = new LinkedHashMap<>();
 
       try (
         InputStream compIn = openCompressor(sourceFile);
@@ -2501,31 +2556,37 @@ public class System extends Service {
             return;
           }
 
+          String linkName = entry.getLinkName();
+          boolean hasLinkTarget = linkName != null && !linkName.isEmpty();
+
           if (entry.isDirectory()) {
             entryFile.mkdirs();
-            setRwx(entryFile);
-          } else if (
-            (entry.isSymbolicLink() || entry.isLink()) &&
-            entry.getLinkName() != null &&
-            !entry.getLinkName().isEmpty()
-          ) {
+            directoryModes.put(entryFile, entry.getMode());
+          } else if (entry.isLink() && hasLinkTarget) {
+            if (
+              !extractHardLink(
+                canonicalDest,
+                entryFile,
+                linkName,
+                entry.getMode()
+              )
+            ) {
+              Log.w(
+                TAG,
+                "Skipping hard link without a usable target: " + entry.getName()
+              );
+            }
+          } else if (entry.isSymbolicLink() && hasLinkTarget) {
             File parent = entryFile.getParentFile();
-            if (!parent.exists()) {
+            if (parent != null && !parent.exists()) {
               parent.mkdirs();
-              setRwx(parent);
             }
-            if (entryFile.exists()) {
-              entryFile.delete();
-            }
-            Files.createSymbolicLink(
-              entryFile.toPath(),
-              Paths.get(entry.getLinkName())
-            );
+            Files.deleteIfExists(entryFile.toPath());
+            Files.createSymbolicLink(entryFile.toPath(), Paths.get(linkName));
           } else {
             File parent = entryFile.getParentFile();
-            if (!parent.exists()) {
+            if (parent != null && !parent.exists()) {
               parent.mkdirs();
-              setRwx(parent);
             }
 
             try (OutputStream out = new FileOutputStream(entryFile)) {
@@ -2536,11 +2597,18 @@ public class System extends Service {
               }
               out.flush();
             }
-            setRwx(entryFile);
+            applyMode(entryFile, entry.getMode());
           }
         }
-        callback.success();
       }
+
+      // Directory modes land last so a read-only directory never blocks the
+      // entries written into it.
+      for (Map.Entry<File, Integer> directory : directoryModes.entrySet()) {
+        applyMode(directory.getKey(), directory.getValue());
+      }
+
+      callback.success();
     } catch (Exception e) {
       StringWriter sw = new StringWriter();
       e.printStackTrace(new PrintWriter(sw));
