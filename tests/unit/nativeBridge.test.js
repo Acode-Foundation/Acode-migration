@@ -105,17 +105,28 @@ describe("Acode bridge", () => {
 		expect(received).toEqual(["chunk", "done"]);
 	});
 
-	test("preserves empty errors, binary buffers and multipart results", async () => {
+	test("preserves binary buffers and multipart results, and describes empty errors", async () => {
 		const { window, pending } = await createBridge();
 		const errors = [];
 		const values = [];
 		window.Bridge.exec(null, (error) => errors.push(error), "File", "read", []);
 		window.Android.callback({ id: pending.at(-1).id, status: 9, keep: false, data: "" });
-		expect(errors).toEqual([""]);
+		expect(errors).toEqual(["File.read failed without an error message"]);
 		window.Bridge.exec((...data) => values.push(data), null, "File", "read", []);
 		window.Android.callback({ id: pending.at(-1).id, status: 1, keep: false, data: { kind: "multipart", data: [{ kind: "arrayBuffer", data: "AP8=" }, 2] } });
 		expect([...new Uint8Array(values[0][0])]).toEqual([0, 255]);
 		expect(values[0][1]).toBe(2);
+	});
+
+	test("names the failing action instead of surfacing a bare action token", async () => {
+		const { window, pending } = await createBridge();
+		const errors = [];
+		window.Bridge.exec(null, (error) => errors.push(error), "System", "extractTarArchive", []);
+		window.Android.callback({ id: pending.at(-1).id, status: 3, keep: false, data: "extractTarArchive" });
+		expect(errors).toEqual(["System.extractTarArchive is not handled by the app"]);
+		window.Bridge.exec(null, (error) => errors.push(error), "System", "mkdirs", []);
+		window.Android.callback({ id: pending.at(-1).id, status: 3, keep: false, data: "mkdirs failed" });
+		expect(errors.at(-1)).toBe("mkdirs failed");
 	});
 
 	test("excludes advertising from paid and billing from F-Droid bridges", async () => {
@@ -321,7 +332,7 @@ describe("typed native API behavior", () => {
         window.iOS.callback({ id, error: "" });
         window.iOS.callback({ id, success: "stale" });
         expect([...new Uint8Array(values[0])]).toEqual([0, 255]);
-        expect(errors).toEqual([""]);
+        expect(errors).toEqual(["Native.test failed without an error message"]);
         const toasts = [];
         window.toast = value => toasts.push(value);
         window.Bridge.exec(() => values.push("toast complete"), null, "Native", "showToast", ["hello"]);

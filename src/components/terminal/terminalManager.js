@@ -12,6 +12,7 @@ import EditorFile from "lib/editorFile";
 import openFile from "lib/openFile";
 import openFolder from "lib/openFolder";
 import appSettings from "lib/settings";
+import axsServer from "native/terminal/axsServer";
 import helpers from "utils/helpers";
 import Url from "utils/Url";
 import TerminalComponent from "./terminal";
@@ -150,9 +151,26 @@ class TerminalManager {
 				return [];
 			}
 
-			if (!(await Terminal.isAxsRunning())) {
-				// Once the backend is gone, previously persisted PIDs are invalid.
-				this.savePersistedSessions([]);
+			// A surviving pid file is not proof the listener is alive, and a
+			// healthy listener can still answer after the pid check fails. Probe
+			// the endpoint and give the backend one chance to recover before
+			// discarding persisted sessions.
+			let healthy = await axsServer.isHealthy();
+			if (!healthy) {
+				healthy = await axsServer
+					.ensureReady({ failsafe: this.isFailsafeMode() })
+					.then(() => true)
+					.catch((error) => {
+						// Only a terminal that is really gone invalidates the stored
+						// PIDs. A slow or failed start must not discard them, or a
+						// transient backend hiccup would lose the user's sessions.
+						if (error?.code === "AXS_NOT_INSTALLED") {
+							this.savePersistedSessions([]);
+						}
+						return false;
+					});
+			}
+			if (!healthy) {
 				return [];
 			}
 
@@ -216,7 +234,43 @@ class TerminalManager {
 		}
 	}
 
+	/**
+	 * Whether the sandbox should be started in failsafe mode. Every AXS start
+	 * must agree on this, or the first one to win decides for the whole boot.
+	 */
+	isFailsafeMode() {
+		return appSettings?.value?.terminalSettings?.failsafeMode === true;
+	}
+
+	/**
+	 * Warm the backend in the background so the first terminal does not pay the
+	 * full sandbox boot cost inside its own connect timeout.
+	 */
+	async prewarmAxs() {
+		try {
+			if (!(await Terminal.isInstalled())) return;
+			await axsServer.ensureReady({ failsafe: this.isFailsafeMode() });
+		} catch (error) {
+			console.debug("AXS pre-warm skipped:", error?.message || error);
+		}
+	}
+
+	/**
+	 * Find a live terminal by the PTY pid it is attached to. The map is keyed by
+	 * pid for normally created terminals, but a terminal that was kept while its
+	 * backend was down is registered under its tab id until the session recovers.
+	 */
+	findTerminalByPid(pid) {
+		if (!pid) return null;
+		const wanted = String(pid);
+		for (const terminal of this.terminals.values()) {
+			if (String(terminal.component?.pid ?? "") === wanted) return terminal;
+		}
+		return null;
+	}
+
 	async restorePersistedSessions() {
+		void this.prewarmAxs();
 		const sessions = await this.getPersistedSessions();
 		if (!sessions.length) return;
 
@@ -227,7 +281,7 @@ class TerminalManager {
 
 		for (const session of sessions) {
 			if (!session?.pid) continue;
-			if (this.terminals.has(session.pid)) continue;
+			if (this.findTerminalByPid(session.pid)) continue;
 
 			try {
 				const instance = await this.createServerTerminal({
@@ -386,6 +440,53 @@ class TerminalManager {
 					} catch (error) {
 						console.error("Failed to initialize terminal:", error);
 
+						if (
+							shouldRetryTerminal(
+								error,
+								isServerMode,
+								isRemoteSsh,
+								isReconnecting,
+							)
+						) {
+							// Keep the tab and retry in the background. Tearing the
+							// terminal down forced the user to reopen it after every
+							// transient backend hiccup.
+							const uniqueId = terminalComponent.pid || terminalId;
+							// The map key stays the tab id until the session exists,
+							// so persist the recovered pid to keep the session list
+							// correct after a reload.
+							terminalComponent.onSessionReady = (pid) => {
+								this.persistTerminalSession(
+									pid,
+									terminalName,
+									terminalFile.pinned,
+								).catch((error) =>
+									console.error(
+										`Failed to persist recovered terminal ${pid}:`,
+										error,
+									),
+								);
+							};
+							this.setupTerminalHandlers(
+								terminalFile,
+								terminalComponent,
+								uniqueId,
+								titlePrefix,
+							);
+							const instance = {
+								id: uniqueId,
+								name: terminalName,
+								terminalNumber,
+								component: terminalComponent,
+								file: terminalFile,
+								container: terminalContainer,
+							};
+							this.terminals.set(uniqueId, instance);
+							terminalComponent.markConnectionFailure(error);
+							resolve(instance);
+							return;
+						}
+
 						// Cleanup on failure - dispose component and remove broken tab
 						try {
 							terminalComponent.dispose();
@@ -406,7 +507,10 @@ class TerminalManager {
 
 						// Show alert for terminal creation failure
 						if (!isReconnecting && !error?.reported) {
-							const errorMessage = error?.message || "Unknown error";
+							const errorMessage =
+								error?.message ||
+								error?.details ||
+								String(error || "Unknown error");
 							alert(
 								strings["error"],
 								`Failed to create terminal: ${errorMessage}`,
@@ -469,7 +573,7 @@ class TerminalManager {
 			} else {
 				const error =
 					Terminal.lastInstallError ||
-					"Terminal installation failed - process did not exit with code 0";
+					"Terminal installation failed: the sandbox configuration exited with a non-zero status. See the installation log above for the reported cause.";
 				return {
 					success: false,
 					error,
@@ -492,7 +596,10 @@ class TerminalManager {
 			.filter(Boolean)
 			.join(" ");
 
-		return message.replace(/^(stdout|stderr)\s+/, "") || "Unknown error";
+		return (
+			message.replace(/^(stdout|stderr)\s+/, "") ||
+			"No error details were reported by the native layer"
+		);
 	}
 
 	/**
@@ -1287,6 +1394,22 @@ class TerminalManager {
 		}
 		return true;
 	}
+}
+
+/**
+ * A failed connection is worth retrying in-place, but an uninstalled or
+ * rejected backend is not: those need the user's attention.
+ */
+function shouldRetryTerminal(error, serverMode, remoteSsh, reconnecting) {
+	if (!serverMode || remoteSsh || reconnecting) return false;
+	if (
+		error?.code === "AXS_SESSION_REJECTED" ||
+		error?.code === "AXS_NOT_INSTALLED"
+	) {
+		return false;
+	}
+	if (error?.name === "AxsConnectionError") return error.retryable !== false;
+	return true;
 }
 
 // Create singleton instance

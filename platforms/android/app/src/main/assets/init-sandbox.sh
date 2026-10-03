@@ -1,5 +1,19 @@
 export LD_LIBRARY_PATH=$PREFIX
 
+# This script is sourced by the device shell (/system/bin/sh, i.e. mksh), which
+# has no arrays, so the argument list is built as a string and deliberately
+# word-split at exec. That makes an unset or whitespace-bearing path a silent
+# corruption ("-b " with no value, or /libproot.so), so validate them up front.
+: "${PREFIX:?PREFIX is not set}"
+: "${NATIVE_DIR:?NATIVE_DIR is not set}"
+
+case "$PREFIX$NATIVE_DIR" in
+    *[[:space:]]*)
+        printf '\033[31m[!]\033[0m PREFIX and NATIVE_DIR must not contain whitespace\n' >&2
+        exit 1
+        ;;
+esac
+
 mkdir -p "$PREFIX/tmp"
 mkdir -p "$PREFIX/ubuntu/tmp"
 mkdir -p "$PREFIX/public"
@@ -31,6 +45,7 @@ for system_mnt in /apex /odm /product /system /system_ext /vendor /linkerconfig/
   ARGS="$ARGS -b ${system_mnt}"
  fi
 done
+
 
 
 
@@ -131,7 +146,16 @@ if [ "$FAILSAFE" = true ] && [ "$INSTALLING" != true ]; then
         LINKER="/system/bin/linker"
     fi
 
-    exec "$LINKER" "$PREFIX/axs" -c "sh"
+    AXS_PORT="${AXS_PORT:-8767}"
+    echo "$AXS_PORT" > "$PREFIX/axs.port"
+    set -- --port "$AXS_PORT"
+    # The app is served from https://localhost, which is AXS's default CORS
+    # allowlist; only an explicit opt-in widens it to any origin.
+    if [ "${AXS_ALLOW_ANY_ORIGIN:-0}" = "1" ]; then
+        set -- "$@" --allow-any-origin
+    fi
+
+    exec "$LINKER" "$PREFIX/axs" "$@" -c "sh"
 else
     exec "$PROOT" $ARGS /bin/sh "$PREFIX/init-ubuntu.sh" "$@"
 fi

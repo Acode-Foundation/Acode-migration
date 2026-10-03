@@ -95,13 +95,13 @@ const api = {
 	) {
 		exec(success, error, "extractAsset", [assetName, destinationPath]);
 	},
-	extractTarXz(
+	extractTarArchive(
 		sourcePath: string,
 		destinationPath: string,
 		success: NativeCallback,
 		error: NativeCallback,
 	) {
-		exec(success, error, "extractTarXz", [sourcePath, destinationPath]);
+		exec(success, error, "extractTarArchive", [sourcePath, destinationPath]);
 	},
 	getParentPath(path: string, success: NativeCallback, error: NativeCallback) {
 		exec(success, error, "getParentPath", [path]);

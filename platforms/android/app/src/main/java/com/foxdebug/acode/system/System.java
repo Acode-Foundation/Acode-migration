@@ -24,8 +24,6 @@ import android.provider.DocumentsContract;
 import android.provider.MediaStore;
 import android.provider.Settings;
 import android.provider.Settings.Global;
-import android.system.ErrnoException;
-import android.system.Os;
 import android.util.Base64;
 import android.util.Log;
 import android.util.TypedValue;
@@ -43,7 +41,6 @@ import androidx.core.graphics.drawable.IconCompat;
 import androidx.documentfile.provider.DocumentFile;
 import com.foxdebug.acode.BuildConfig;
 import java.io.BufferedReader;
-import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -62,15 +59,9 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.util.*;
-import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
-import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
-import org.apache.commons.compress.compressors.CompressorException;
-import org.apache.commons.compress.compressors.CompressorStreamFactory;
-import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream;
 import com.foxdebug.acode.runtime.BridgeContext;
 import com.foxdebug.acode.runtime.Callback;
 import com.foxdebug.acode.runtime.Service;
@@ -182,7 +173,7 @@ public class System extends Service {
       case "compare-file-text":
       case "compare-texts":
       case "extractAsset":
-      case "extractTarXz":
+      case "extractTarArchive":
       case "pin-file-shortcut":
         break;
       case "get-configuration":
@@ -446,14 +437,14 @@ public class System extends Service {
                 );
               }
               return;
-            case "extractTarXz":
+            case "extractTarArchive":
               try {
                 String sourcePath = args.getString(0);
                 String destinationPath = args.getString(1);
-                extractTarXz(sourcePath, destinationPath, callbackContext);
+                extractTarArchive(sourcePath, destinationPath, callbackContext);
               } catch (Exception e) {
                 callbackContext.error(
-                  "Failed to extract tar.xz: " + e.getMessage()
+                  "Failed to extract tar archive: " + e.getMessage()
                 );
               }
               return;
@@ -2442,177 +2433,24 @@ public class System extends Service {
     }
   }
 
-  private InputStream openCompressor(File source) throws Exception {
-    String name = source.getName().toLowerCase();
-    if (name.endsWith(".tar.gz") || name.endsWith(".tgz")) {
-      return new GzipCompressorInputStream(
-        new BufferedInputStream(new FileInputStream(source))
-      );
-    } else if (name.endsWith(".tar.xz") || name.endsWith(".txz")) {
-      return new CompressorStreamFactory()
-        .createCompressorInputStream(
-          CompressorStreamFactory.XZ,
-          new FileInputStream(source)
-        );
-    }
-    try {
-      return new CompressorStreamFactory()
-        .createCompressorInputStream(
-          new BufferedInputStream(new FileInputStream(source))
-        );
-    } catch (CompressorException e) {
-      // Uncompressed tar archives have no compressor signature; read them as-is.
-      return new BufferedInputStream(new FileInputStream(source));
-    }
-  }
-
-  private void applyMode(File file, int mode) {
-    int permissions = mode & 07777;
-    if (permissions == 0) return;
-    try {
-      Os.chmod(file.getAbsolutePath(), permissions);
-    } catch (ErrnoException e) {
-      Log.w(
-        TAG,
-        "Can't apply mode " +
-        Integer.toOctalString(permissions) +
-        " to " +
-        file.getPath()
-      );
-    }
-  }
-
-  /**
-   * Recreates a tar hard link as an independent copy. A hard-link entry has no
-   * payload and its name is relative to the archive root, not to the link's own
-   * directory. Android storage does not reliably support link(2) for app files,
-   * so the already extracted target is copied instead.
-   */
-  private boolean extractHardLink(
-    String canonicalDest,
-    File linkFile,
-    String linkName,
-    int mode
-  ) {
-    try {
-      File target = new File(canonicalDest, linkName.replaceFirst("^/+", ""));
-      String canonicalTarget = target.getCanonicalPath();
-      if (
-        !canonicalTarget.startsWith(canonicalDest + File.separator) ||
-        !target.exists() ||
-        target.isDirectory()
-      ) {
-        return false;
-      }
-
-      File parent = linkFile.getParentFile();
-      if (parent != null && !parent.exists()) {
-        parent.mkdirs();
-      }
-
-      Files.copy(
-        target.toPath(),
-        linkFile.toPath(),
-        StandardCopyOption.REPLACE_EXISTING
-      );
-      applyMode(linkFile, mode);
-      return true;
-    } catch (IOException e) {
-      Log.w(TAG, "Can't recreate hard link " + linkFile.getPath());
-      return false;
-    }
-  }
-
-  private void extractTarXz(
+  private void extractTarArchive(
     String sourcePath,
     String destinationPath,
     Callback callback
   ) {
     try {
-      File sourceFile = new File(sourcePath);
-      File destDir = new File(destinationPath);
-      if (!destDir.exists()) {
-        destDir.mkdirs();
-      }
-
-      Map<File, Integer> directoryModes = new LinkedHashMap<>();
-
-      try (
-        InputStream compIn = openCompressor(sourceFile);
-        TarArchiveInputStream tarIn = new TarArchiveInputStream(compIn)
-      ) {
-        String canonicalDest = destDir.getCanonicalPath();
-        TarArchiveEntry entry;
-        while ((entry = tarIn.getNextEntry()) != null) {
-          File entryFile = new File(canonicalDest, entry.getName());
-          String canonicalEntry = entryFile.getCanonicalPath();
-          if (
-            !canonicalEntry.startsWith(canonicalDest + File.separator) &&
-            !canonicalEntry.equals(canonicalDest)
-          ) {
-            callback.error(
-              "Path traversal detected in tar entry: " + entry.getName()
-            );
-            return;
-          }
-
-          String linkName = entry.getLinkName();
-          boolean hasLinkTarget = linkName != null && !linkName.isEmpty();
-
-          if (entry.isDirectory()) {
-            entryFile.mkdirs();
-            directoryModes.put(entryFile, entry.getMode());
-          } else if (entry.isLink() && hasLinkTarget) {
-            if (
-              !extractHardLink(
-                canonicalDest,
-                entryFile,
-                linkName,
-                entry.getMode()
-              )
-            ) {
-              Log.w(
-                TAG,
-                "Skipping hard link without a usable target: " + entry.getName()
-              );
-            }
-          } else if (entry.isSymbolicLink() && hasLinkTarget) {
-            File parent = entryFile.getParentFile();
-            if (parent != null && !parent.exists()) {
-              parent.mkdirs();
-            }
-            Files.deleteIfExists(entryFile.toPath());
-            Files.createSymbolicLink(entryFile.toPath(), Paths.get(linkName));
-          } else {
-            File parent = entryFile.getParentFile();
-            if (parent != null && !parent.exists()) {
-              parent.mkdirs();
-            }
-
-            try (OutputStream out = new FileOutputStream(entryFile)) {
-              byte[] buffer = new byte[8192];
-              int length;
-              while ((length = tarIn.read(buffer)) != -1) {
-                out.write(buffer, 0, length);
-              }
-              out.flush();
-            }
-            applyMode(entryFile, entry.getMode());
-          }
-        }
-      }
-
-      // Directory modes land last so a read-only directory never blocks the
-      // entries written into it.
-      for (Map.Entry<File, Integer> directory : directoryModes.entrySet()) {
-        applyMode(directory.getKey(), directory.getValue());
-      }
-
+      ArchiveExtractor.extract(new File(sourcePath), new File(destinationPath));
       callback.success();
     } catch (Exception e) {
-      StringWriter sw = new StringWriter();
-      e.printStackTrace(new PrintWriter(sw));
-      callback.error(sw.toString());
+      // Keep the stack in logcat, but report a concise cause to the UI.
+      Log.e(TAG, "Failed to extract tar archive " + sourcePath, e);
+      String detail = e.getMessage();
+      callback.error(
+        "Failed to extract " +
+        sourcePath +
+        ": " +
+        (detail != null && !detail.isEmpty() ? detail : e.toString())
+      );
     }
   }
 }

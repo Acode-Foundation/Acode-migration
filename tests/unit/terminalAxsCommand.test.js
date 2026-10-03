@@ -52,10 +52,15 @@ const SHELL_ONLY_WORDS = new Set([
 	"wait",
 ]);
 
-/** Extract every `axs ... -c "<cmd>"` payload from a script. */
+/**
+ * Extract the payload of every `... axs ... -c "<cmd>"` launch. Anchoring on
+ * the axs argv position avoids matching unrelated `-c "..."` flags elsewhere in
+ * shell text while still tolerating quoting (including `"$@"`) and line wrapping.
+ */
 function axsCommands(source) {
 	const commands = [];
-	const pattern = /axs"\s+-c\s+"([^"]*)"/g;
+	const pattern =
+		/\baxs"?(?:\s+(?:"[^"]*"|'[^']*'|[^\s"']+))*?\s+-c\s+"([^"]*)"/g;
 	for (const match of source.matchAll(pattern)) {
 		commands.push(match[1]);
 	}

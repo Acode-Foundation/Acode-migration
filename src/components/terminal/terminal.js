@@ -19,7 +19,12 @@ import {
 import confirm from "dialogs/confirm";
 import fonts from "lib/fonts";
 import appSettings from "lib/settings";
+import axsServer, {
+	AxsConnectionError,
+	DEFAULT_AXS_PORT,
+} from "native/terminal/axsServer";
 import { quotePosixShellArg } from "utils/shell";
+import sleep from "utils/sleep";
 import LigaturesAddon from "./ligatures";
 import {
 	DEFAULT_TERMINAL_SETTINGS,
@@ -29,8 +34,13 @@ import TerminalThemeManager from "./terminalThemeManager";
 import TerminalTouchScrolling from "./terminalTouchScrolling";
 import TerminalTouchSelection from "./terminalTouchSelection";
 
-// Backoff for re-attaching to a live PTY after the socket drops (e.g. app suspension).
-const RECONNECT_DELAYS = [0, 500, 1500, 3000];
+// Re-attaching to a live PTY after the socket drops (e.g. app suspension).
+const RECONNECT_DELAYS = [0, 500, 1500, 3000, 6000, 10000];
+const RECONNECT_JITTER = 250;
+const CONNECT_TIMEOUT = 10000;
+const CONNECT_ATTEMPTS = 2;
+const SESSION_REQUEST_ATTEMPTS = 3;
+const RETRY_BASE_DELAY = 400;
 const DISCONNECTED_NOTICE =
 	"\r\n\x1b[2m[Disconnected from terminal session. Press any key to reconnect.]\x1b[0m\r\n";
 
@@ -44,7 +54,7 @@ export default class TerminalComponent {
 			scrollOnUserInput: true,
 			rows: options.rows || 24,
 			cols: options.cols || 80,
-			port: options.port || 8767,
+			port: options.port || DEFAULT_AXS_PORT,
 			renderer: options.renderer || "auto", // 'auto' | 'canvas' | 'webgl'
 			fontSize: terminalSettings.fontSize,
 			fontFamily: terminalSettings.fontFamily,
@@ -89,6 +99,8 @@ export default class TerminalComponent {
 		this.reconnectAttempts = 0;
 		this.disconnected = false;
 		this.boundResumeConnection = null;
+		// Notified with the pid whenever a socket is (re)opened successfully.
+		this.onSessionReady = null;
 
 		this.init();
 	}
@@ -159,7 +171,7 @@ export default class TerminalComponent {
 
 		// Retry a dropped session on the next keypress or when the app returns
 		this.terminal.onData(() => this.resumeConnection());
-		this.boundResumeConnection = () => this.resumeConnection();
+		this.boundResumeConnection = () => this.resumeFromForeground();
 		document.addEventListener("resume", this.boundResumeConnection);
 	}
 
@@ -699,7 +711,7 @@ export default class TerminalComponent {
 	}
 
 	/**
-	 * Create new terminal session using global Terminal API
+	 * Create new terminal session using the AXS backend.
 	 * @returns {Promise<string>} Terminal PID
 	 */
 	async createSession() {
@@ -710,72 +722,85 @@ export default class TerminalComponent {
 		}
 
 		try {
-			// Check if terminal is installed before starting AXS
-			if (!(await Terminal.isInstalled())) {
-				throw new Error(
-					"Terminal not installed. Please install terminal first.",
-				);
-			}
+			this.prepareTerminalSettings();
+			await this.ensureBackendReady();
+			return await this.requestSession(this.options.port);
+		} catch (error) {
+			console.error("Failed to create terminal session:", error);
+			throw toAxsError(error, "Failed to create terminal session");
+		}
+	}
 
-			// Start AXS if not running
-			if (!(await Terminal.isAxsRunning())) {
-				const values = appSettings.value;
-				// Initialize terminal settings with defaults if not present
-				if (!values.terminalSettings) {
-					values.terminalSettings = {
-						...DEFAULT_TERMINAL_SETTINGS,
-						fontFamily:
-							DEFAULT_TERMINAL_SETTINGS.fontFamily ||
-							appSettings.value.fontFamily,
-					};
-				}
-
-				const terminalValues = values.terminalSettings;
-
-				Executor.setProotDebug(terminalValues.prootDebug);
-				Executor.BackgroundExecutor.setProotDebug(terminalValues.prootDebug);
-
-				await Terminal.startAxs(
-					false,
-					() => {},
-					console.error,
-					terminalValues.failsafeMode,
-				);
-			}
-
-			// A live AXS process does not guarantee that its HTTP listener is ready.
-			// This is especially noticeable during a cold app start.
-			await this.waitForServerReady();
-
-			const requestBody = {
-				cols: this.terminal.cols,
-				rows: this.terminal.rows,
+	/**
+	 * Apply the settings the sandbox process needs before it starts.
+	 */
+	prepareTerminalSettings() {
+		const values = appSettings.value;
+		if (!values.terminalSettings) {
+			values.terminalSettings = {
+				...DEFAULT_TERMINAL_SETTINGS,
+				fontFamily:
+					DEFAULT_TERMINAL_SETTINGS.fontFamily || appSettings.value.fontFamily,
 			};
+		}
 
-			const response = await new Promise((resolve, reject) => {
-				Bridge.http.sendRequest(
-					`http://127.0.0.1:${this.options.port}/terminals`,
+		const terminalValues = values.terminalSettings;
+		Executor.setProotDebug(terminalValues.prootDebug);
+		Executor.BackgroundExecutor.setProotDebug(terminalValues.prootDebug);
+	}
+
+	isFailsafeMode() {
+		return appSettings?.value?.terminalSettings?.failsafeMode === true;
+	}
+
+	/**
+	 * Guarantee a live AXS listener and adopt its port. Startup, health probing,
+	 * stale-process recovery and port selection all live in the AXS lifecycle
+	 * module so concurrent terminals share a single attempt.
+	 */
+	async ensureBackendReady() {
+		const port = await axsServer.ensureReady({
+			failsafe: this.isFailsafeMode(),
+		});
+		this.options.port = port;
+		return port;
+	}
+
+	/**
+	 * Ask the backend for a PTY. AXS answers a failed spawn with HTTP 200 and a
+	 * JSON error body, so the body is validated, not just the status code.
+	 */
+	async requestSession(port) {
+		let lastError = null;
+
+		for (let attempt = 0; attempt < SESSION_REQUEST_ATTEMPTS; attempt += 1) {
+			try {
+				const response = await sendBridgeRequest(
+					`http://127.0.0.1:${port}/terminals`,
 					{
 						method: "POST",
 						responseType: "text",
 						serializer: "json",
-						data: requestBody,
+						data: { cols: this.terminal.cols, rows: this.terminal.rows },
 					},
-					(res) => resolve(res),
-					(err) => reject(new Error(err.error || `HTTP error!`)),
 				);
-			});
 
-			if (response.status < 200 || response.status >= 300) {
-				throw new Error(`HTTP error! status: ${response.status}`);
-			}
+				if (response.status < 200 || response.status >= 300) {
+					throw new AxsConnectionError(
+						"AXS_SESSION_REJECTED",
+						`Terminal backend rejected the session (HTTP ${response.status})`,
+					);
+				}
 
-			// AXS answers a failed spawn with HTTP 200 and a JSON error body, so the
-			// status check above is not enough. Without this guard the error text is
-			// used as a pid and the real cause only shows up later as a confusing
-			// "WebSocket handshake 404" against /terminals/%7B%22error%22...%7D.
-			const pid = String(response.data ?? "").trim();
-			if (!/^\d+$/.test(pid)) {
+				// Without this guard the error text is used as a pid and the real
+				// cause only shows up later as a confusing "WebSocket handshake 404"
+				// against /terminals/%7B%22error%22...%7D.
+				const pid = String(response.data ?? "").trim();
+				if (/^\d+$/.test(pid)) {
+					this.pid = pid;
+					return pid;
+				}
+
 				let message = pid;
 				try {
 					const parsed = JSON.parse(pid);
@@ -783,59 +808,26 @@ export default class TerminalComponent {
 				} catch {
 					// Not JSON — fall back to the raw body.
 				}
-				throw new Error(
+				throw new AxsConnectionError(
+					"AXS_SESSION_REJECTED",
 					message
 						? `Failed to create terminal session: ${message}`
 						: "Failed to create terminal session: empty response from AXS",
+					message,
+					false,
 				);
-			}
-
-			this.pid = pid;
-			return this.pid;
-		} catch (error) {
-			console.error("Failed to create terminal session:", error);
-			throw error;
-		}
-	}
-
-	/**
-	 * Wait until the AXS HTTP server is accepting requests.
-	 * @param {number} maxAttempts - Maximum number of readiness checks
-	 * @param {number} retryDelay - Delay between checks in milliseconds
-	 */
-	async waitForServerReady(maxAttempts = 20, retryDelay = 500) {
-		const statusUrl = `http://127.0.0.1:${this.options.port}/status`;
-
-		for (let attempt = 0; attempt < maxAttempts; attempt++) {
-			try {
-				const response = await new Promise((resolve, reject) => {
-					Bridge.http.sendRequest(
-						statusUrl,
-						{ method: "GET", responseType: "text" },
-						resolve,
-						reject,
-					);
-				});
-
-				if (
-					response.status >= 200 &&
-					response.status < 300 &&
-					response.data?.trim() === "OK"
-				) {
-					return;
+			} catch (error) {
+				lastError = error;
+				if (!isRetryable(error) || attempt === SESSION_REQUEST_ATTEMPTS - 1) {
+					break;
 				}
-			} catch {
-				// Connection failures are expected while AXS is binding its port.
-			}
-
-			if (attempt < maxAttempts - 1) {
-				await new Promise((resolve) => setTimeout(resolve, retryDelay));
+				await this.ensureBackendReady().catch(() => {});
+				port = this.options.port;
+				await sleep(RETRY_BASE_DELAY * (attempt + 1));
 			}
 		}
 
-		throw new Error(
-			`AXS terminal server did not become ready on port ${this.options.port}`,
-		);
+		throw toAxsError(lastError, "Failed to create terminal session");
 	}
 
 	/**
@@ -853,17 +845,45 @@ export default class TerminalComponent {
 			return this.connectToRemoteShell();
 		}
 
-		if (!pid) {
-			pid = await this.createSession();
+		await this.ensureBackendReady();
+
+		if (pid) {
+			this.pid = pid;
+		} else {
+			await this.createSession();
 		}
 
-		this.pid = pid;
+		let lastError = null;
+		for (let attempt = 0; attempt < CONNECT_ATTEMPTS; attempt += 1) {
+			try {
+				await this.openSocket(this.pid, reattach);
+				this.onSessionReady?.(this.pid);
+				return;
+			} catch (error) {
+				lastError = error;
+				if (attempt === CONNECT_ATTEMPTS - 1) break;
+				// The backend may have died between the readiness probe and the
+				// handshake; heal it before dialing again.
+				await this.ensureBackendReady().catch(() => {});
+				await sleep(RETRY_BASE_DELAY * (attempt + 1));
+			}
+		}
 
+		throw toAxsError(
+			lastError,
+			`Failed to connect to terminal session ${this.pid}`,
+		);
+	}
+
+	/**
+	 * Open the PTY socket once. Kept separate from `connectToSession` so the
+	 * handshake can be retried without re-creating the session.
+	 */
+	openSocket(pid, reattach = false) {
 		const wsUrl = `ws://127.0.0.1:${this.options.port}/terminals/${pid}`;
 
-		await new Promise((resolve, reject) => {
+		return new Promise((resolve, reject) => {
 			const websocket = new WebSocket(wsUrl);
-			const CONNECT_TIMEOUT = 5000;
 			let settled = false;
 			let hasOpened = false;
 
@@ -889,6 +909,8 @@ export default class TerminalComponent {
 				clearTimeout(connectionTimeout);
 				hasOpened = true;
 				this.isConnected = true;
+				this.disconnected = false;
+				this.reconnectAttempts = 0;
 				this.onConnect?.();
 				if (reattach) this.terminal.reset();
 
@@ -983,8 +1005,9 @@ export default class TerminalComponent {
 			this.terminal.write(DISCONNECTED_NOTICE);
 			return;
 		}
+
 		const delay = RECONNECT_DELAYS[this.reconnectAttempts++];
-		await new Promise((resolve) => setTimeout(resolve, delay));
+		await sleep(delay + Math.floor(Math.random() * RECONNECT_JITTER));
 		if (this.intentionalClose || this.processExited) return;
 
 		try {
@@ -994,6 +1017,9 @@ export default class TerminalComponent {
 			if (this.intentionalClose) this.websocket?.close();
 		} catch (error) {
 			console.error(`Failed to reconnect terminal ${this.pid}:`, error);
+			// A restarted backend no longer knows the old PTY; start a fresh shell
+			// instead of retrying a pid that can never come back.
+			if (isSessionMissing(error)) this.pid = null;
 			await this.reconnectToSession();
 		}
 	}
@@ -1007,6 +1033,43 @@ export default class TerminalComponent {
 		}
 		this.disconnected = false;
 		void this.reconnectToSession();
+	}
+
+	/**
+	 * Keep the tab alive after a failed connection and retry in the background
+	 * instead of deleting the user's terminal.
+	 */
+	markConnectionFailure(error) {
+		if (this.intentionalClose || this.processExited) return;
+		this.disconnected = true;
+		this.isConnected = false;
+		const detail = error?.details || error?.message || String(error);
+		this.terminal.write(
+			`\r\n\x1b[31m[Terminal backend unavailable: ${detail}]\x1b[0m\r\n`,
+		);
+		void this.reconnectToSession();
+	}
+
+	/**
+	 * On foreground, re-check the listener: mobile hosts can drop the bound
+	 * socket while the app is suspended even though the PID survives.
+	 */
+	resumeFromForeground() {
+		if (this.intentionalClose || this.processExited || this.remoteSsh) return;
+		if (this.disconnected) {
+			this.resumeConnection();
+			return;
+		}
+		void axsServer
+			.isHealthy()
+			.then((healthy) => {
+				if (!healthy) {
+					this.markConnectionFailure(
+						new Error("Terminal backend stopped listening"),
+					);
+				}
+			})
+			.catch(() => {});
 	}
 
 	/**
@@ -1592,6 +1655,44 @@ export default class TerminalComponent {
 	onTitleChange(title) {}
 	onBell() {}
 	onProcessExit(exitData) {}
+}
+
+function sendBridgeRequest(url, options) {
+	return new Promise((resolve, reject) => {
+		try {
+			Bridge.http.sendRequest(url, options, resolve, (error) => {
+				const message =
+					typeof error === "string"
+						? error
+						: error?.error || error?.message || `Request to ${url} failed`;
+				reject(new Error(message));
+			});
+		} catch (error) {
+			reject(error);
+		}
+	});
+}
+
+function toAxsError(error, fallbackMessage) {
+	if (error instanceof AxsConnectionError) return error;
+	const message = error?.message
+		? `${fallbackMessage}: ${error.message}`
+		: fallbackMessage;
+	return new AxsConnectionError(
+		"AXS_UNAVAILABLE",
+		message,
+		String(error?.message ?? error ?? ""),
+	);
+}
+
+function isRetryable(error) {
+	return error instanceof AxsConnectionError ? error.retryable !== false : true;
+}
+
+function isSessionMissing(error) {
+	return /unavailable|not found|code 404|404/i.test(
+		String(error?.message ?? error ?? ""),
+	);
 }
 
 // Internal helpers for WebGL renderer lifecycle
