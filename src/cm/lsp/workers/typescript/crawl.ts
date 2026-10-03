@@ -13,6 +13,10 @@ interface Listing {
 	list(path: string): Promise<Map<string, DirectoryEntry> | undefined>;
 }
 
+interface ListedEntries {
+	listedEntries(path: string): { files: string[]; directories: string[] };
+}
+
 /** Breadth-first scan for source files, bounded by the directory budget. */
 export default async function crawl(
 	fs: Listing,
@@ -41,6 +45,35 @@ export default async function crawl(
 			}
 		});
 		options.onProgress?.(visited, files.length);
+	}
+	return files;
+}
+
+/**
+ * Source files among folders already listed, with the crawl's skip rules and
+ * limits. Re-run on every refresh so files found later stay in the project.
+ */
+export function listedSourceFiles(
+	fs: ListedEntries,
+	root: string,
+	options: CrawlOptions,
+): string[] {
+	const files: string[] = [];
+	const pending = [root];
+	for (
+		let visited = 0;
+		pending.length && visited < options.maxDirectories;
+		visited++
+	) {
+		const directory = pending.shift()!;
+		const entries = fs.listedEntries(directory);
+		for (const name of entries.directories) {
+			if (!options.skipDirectory(name)) pending.push(joinPath(directory, name));
+		}
+		for (const name of entries.files) {
+			if (files.length >= options.maxFiles) return files;
+			if (options.includeFile(name)) files.push(joinPath(directory, name));
+		}
 	}
 	return files;
 }

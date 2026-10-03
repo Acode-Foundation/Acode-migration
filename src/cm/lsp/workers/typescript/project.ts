@@ -1,6 +1,6 @@
 import ts from "typescript";
 import { TextDocument } from "vscode-languageserver-textdocument";
-import crawl from "./crawl";
+import crawl, { type CrawlOptions, listedSourceFiles } from "./crawl";
 import type ProjectFileSystem from "./fileSystem";
 import { joinPath } from "./paths";
 import ProjectHost from "./projectHost";
@@ -39,7 +39,6 @@ export default class Project {
 	#options: ProjectOptions;
 	#host: ProjectHost;
 	#configPath: string | undefined;
-	#sourceFiles: string[] = [];
 	#loaded = false;
 	#openDocuments = new Map<string, TextDocument>();
 	#openDocumentsKey = "";
@@ -86,15 +85,8 @@ export default class Project {
 			await fs.read(this.#configPath);
 		}
 		this.refresh();
-		this.#sourceFiles = await crawl(fs, this.root, {
-			skipDirectory: (name) =>
-				name.startsWith(".") ||
-				DEPENDENCY_DIRECTORIES.has(name) ||
-				(!configName && OUTPUT_DIRECTORIES.has(name)),
-			includeFile: (name) =>
-				SOURCE_FILE.test(name) && !name.endsWith(".min.js"),
-			maxDirectories: MAX_DIRECTORIES,
-			maxFiles: MAX_FILES,
+		await crawl(fs, this.root, {
+			...this.#scanOptions(),
 			onProgress: (directories, files) =>
 				onProgress(`Scanned ${directories} folders, ${files} source files`),
 		});
@@ -105,7 +97,9 @@ export default class Project {
 
 	refresh(): void {
 		if (!this.#configPath) {
-			this.#host.configure(compilerDefaults(), this.#sourceFiles);
+			const { fs } = this.#options;
+			const files = listedSourceFiles(fs, this.root, this.#scanOptions());
+			this.#host.configure(compilerDefaults(), files);
 			return;
 		}
 		const parsed = this.#parseConfig(this.#configPath);
@@ -121,12 +115,13 @@ export default class Project {
 		return path?.startsWith(`${this.root}/`) ? path : undefined;
 	}
 
-	/** A program without `allowJs` cannot hold JavaScript, as in tsserver. */
+	/**
+	 * A program without JavaScript support cannot hold JavaScript, as in
+	 * tsserver. `checkJs` implies `allowJs` unless that is set explicitly.
+	 */
 	accepts(fileName: string): boolean {
-		return (
-			!JAVASCRIPT_FILE.test(fileName) ||
-			this.#host.getCompilationSettings().allowJs === true
-		);
+		const { allowJs, checkJs } = this.#host.getCompilationSettings();
+		return !JAVASCRIPT_FILE.test(fileName) || (allowJs ?? checkJs === true);
 	}
 
 	uriOf(fileName: string): string | undefined {
@@ -186,6 +181,20 @@ export default class Project {
 			defaults,
 			configPath,
 		);
+	}
+
+	#scanOptions(): CrawlOptions {
+		const configured = !!this.#configPath;
+		return {
+			skipDirectory: (name) =>
+				name.startsWith(".") ||
+				DEPENDENCY_DIRECTORIES.has(name) ||
+				(!configured && OUTPUT_DIRECTORIES.has(name)),
+			includeFile: (name) =>
+				SOURCE_FILE.test(name) && !name.endsWith(".min.js"),
+			maxDirectories: MAX_DIRECTORIES,
+			maxFiles: MAX_FILES,
+		};
 	}
 
 	#reportConfigErrors(errors: readonly ts.Diagnostic[]): void {

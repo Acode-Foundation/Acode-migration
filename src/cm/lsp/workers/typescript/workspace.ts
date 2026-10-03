@@ -156,12 +156,17 @@ export default class TypeScriptWorkspace {
 		this.#fallback.dispose();
 	}
 
+	/** The deepest owning folder wins, whatever order folders were added in. */
 	#claim(uri: string): { project: Project; fileName: string } | undefined {
+		let owner: { project: Project; fileName: string } | undefined;
 		for (const project of this.#projects.values()) {
 			const fileName = project.pathOf(uri);
-			if (fileName && project.accepts(fileName)) return { project, fileName };
+			if (!fileName) continue;
+			if (!owner || project.root.length > owner.project.root.length) {
+				owner = { project, fileName };
+			}
 		}
-		return undefined;
+		return owner?.project.accepts(owner.fileName) ? owner : undefined;
 	}
 
 	#changed(): void {
@@ -175,8 +180,21 @@ export default class TypeScriptWorkspace {
 	}
 }
 
+/**
+ * `file:` URLs from listings are already decoded, so their names are kept
+ * as-is; other providers encode theirs, e.g. a `tree/primary%3AProjects%2Fapp`
+ * storage URI names the folder `app`.
+ */
 function folderName(url: string): string {
-	return decodeURIComponent(url.slice(url.lastIndexOf("/") + 1)) || url;
+	const name = url.slice(url.lastIndexOf("/") + 1);
+	if (url.startsWith("file:")) return name || url;
+	let decoded = name;
+	try {
+		decoded = decodeURIComponent(name);
+	} catch {
+		// Not percent-encoded after all; show it as listed.
+	}
+	return decoded.split(/[/:]/).filter(Boolean).pop() || url;
 }
 
 /**
