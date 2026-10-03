@@ -65,6 +65,20 @@ SIGUSR1` in Xcode's debug console, then `continue`.
 - `meson.build` builds the selected upstream libarchive sources and Acode bridge;
   command-line utilities and upstream e2e tests are excluded from cross builds.
 - `fs/fake.c` releases its host root descriptor and bind table when unmounted.
+- `fs/real.c` translates Darwin directory-unlink `EPERM` to Linux `EISDIR`,
+  allowing Bun to remove directory locks.
+- `/proc/stat` includes all ten CPU counters and `/proc/<pid>/stat` reports
+  immutable process start ticks for process inspection and daemon identity checks.
+- `kernel/group.c` handles the last terminal session member exiting after its
+  session leader has been reaped.
+- Synchronous memory and illegal-instruction faults restore default handling if
+  their signals are blocked or ignored, preventing infinite fault retries.
+- ARM64 halfword lane loads and stores decode the lane index correctly, including
+  post-indexed addressing. This fixes Bun's hybrid TLS key exchange failures.
+- The code-cache page table has 65,536 buckets to reduce unrelated code
+  invalidation during Bun's JIT writes, using 2 MiB per guest address space.
+- Block-cache hashing removes ARM64 instruction-alignment bits so all existing
+  buckets are used, without increasing cache allocation.
 - `kernel/exit.c` clears the exiting leader's thread-local pointer before its
   parent can reap it, preventing pthread cleanup from accessing a freed task.
 - `Bridge/AlpineFaults.c` reuses upstream ARM64 fault recovery and delegates faults
@@ -90,8 +104,33 @@ This is Linux userspace emulation, not Android proot. APK packages run as ARM64
 Linux programs, but support still depends on the emulator's instructions and
 syscalls. Upstream forces Node to run without JIT and with a 512 MiB old-space
 limit; V8 WebAssembly and packages requiring unsupported syscalls may not work.
-The upstream optional WebAssembly polyfills are not bundled. iOS may suspend or
-terminate the app in the background. PRoot debug mode has no effect on iOS.
+The injected `--no-expose-wasm` flag suppresses V8's conflicting-flag warning;
+it does not enable WebAssembly.
+Bun (including compiled CLIs such as OpenCode) keeps baseline JIT for FFI, while
+optimizing/concurrent JIT and concurrent garbage collection are disabled through
+`BUN_JSC_` guest settings. iOS shell setup installs
+`procps-ng` because daemon-based CLIs require process inspection options missing
+from BusyBox `ps`. GNU `tar` and `gzip` replace BusyBox archive extraction to
+reduce the CPU cost of unpacking large CLI binaries. The upstream optional
+WebAssembly polyfills are not bundled. iOS may suspend or terminate the app in
+the background. PRoot debug mode has no effect on iOS.
 Physical-device performance, memory pressure and background behavior need their
 own validation. iOS backups preserve Linux metadata and exclude host mounts;
 Android proot backup archives have a different layout.
+
+### Pi coding agent
+
+The npm package `pi` is a numeric calculator. The coding agent is
+`@earendil-works/pi-coding-agent`. Its Node entry point requires WebAssembly,
+so launch it explicitly with Bun on iOS:
+
+```sh
+npm uninstall -g pi # Only if the unrelated calculator was installed.
+npm install -g bun@1.4.2
+npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.99.1
+bun --bun "$(command -v pi)"
+```
+
+The published CLI's startup, terminal input, and a local streaming HTTP response
+passed simulator checks with the official ARM64 musl Bun binary. Physical-device
+authentication, provider requests, and coding tasks still need validation.

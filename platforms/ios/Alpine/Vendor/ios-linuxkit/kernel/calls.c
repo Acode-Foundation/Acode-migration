@@ -644,7 +644,7 @@ void handle_interrupt(int interrupt) {
                 dump_stack(8);
                 dump_maps();
             }
-            deliver_signal(current, SIGSEGV_, info);
+            force_signal(current, SIGSEGV_, info);
         }
         gpf_handled:;
     } else if (interrupt == INT_UNDEFINED) {
@@ -664,7 +664,7 @@ void handle_interrupt(int interrupt) {
             .code = SI_KERNEL_,
             .fault.addr = cpu->pc,
         };
-        deliver_signal(current, SIGILL_, info);
+        force_signal(current, SIGILL_, info);
     } else if (interrupt == INT_BREAKPOINT) {
         {
             uint32_t brk_insn = 0;

@@ -24,6 +24,7 @@ struct task {
     struct tgroup *group; // immutable
     struct list group_links;
     pid_t_ pid, tgid; // immutable
+    uint64_t start_time_ticks; // immutable, Linux USER_HZ (100 ticks/second)
     uid_t_ uid, gid;
     uid_t_ euid, egid;
     uid_t_ suid, sgid;

@@ -142,6 +142,8 @@ struct sigevent_ {
 void send_signal(struct task *task, int sig, struct siginfo_ info);
 // send a signal without regard for whether the signal is blocked or ignored
 void deliver_signal(struct task *task, int sig, struct siginfo_ info);
+// Force a synchronous fault, restoring default handling if blocked or ignored.
+void force_signal(struct task *task, int sig, struct siginfo_ info);
 // send a signal to current if it's not blocked or ignored, return whether that worked
 // exists specifically for sending SIGTTIN/SIGTTOU
 bool try_self_signal(int sig);

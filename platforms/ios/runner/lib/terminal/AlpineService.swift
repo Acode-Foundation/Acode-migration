@@ -41,10 +41,6 @@ final class AlpineService: BaseService {
         chmod +x /acode/axs
         ln -sf /acode/axs /usr/local/bin/axs
         /bin/sh /acode/init-alpine.sh --installing
-        if ! apk info -e bash command-not-found tzdata wget >/dev/null; then
-            rm -rf /acode/.configured
-            exit 1
-        fi
         """
         try runtime.start(setup, listener: { kind, text in
             callback.success(["type": kind, "data": text], keep: kind != "exit")

@@ -1289,3 +1289,19 @@ dword_t sys_tkill(pid_t_ tid, dword_t sig) {
         return _EINVAL;
     return do_kill(tid, sig, 0, SI_TKILL_);
 }
+
+void force_signal(struct task *task, int sig, struct siginfo_ info) {
+    struct sighand *sighand = task->sighand;
+    if (sighand == NULL)
+        return;
+    lock(&sighand->lock);
+    struct sigaction_ *action = &sighand->action[sig];
+    // A blocked or ignored fault cannot resume at the faulting instruction.
+    if (sigset_has(task->blocked, sig) || action->handler == SIG_IGN_) {
+        action->handler = SIG_DFL_;
+        sigset_del(&task->blocked, sig);
+    }
+    deliver_signal_unlocked(task, sig, info);
+    unlock(&sighand->lock);
+    cpu_poke(&task->cpu);
+}

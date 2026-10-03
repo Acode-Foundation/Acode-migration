@@ -848,6 +848,7 @@ dword_t sys_execve(addr_t filename_addr, addr_t argv_addr, addr_t envp_addr) {
 
             static const char *inject_args_base[] = {
                 "--jitless",
+                "--no-expose-wasm",
                 "--no-lazy",
                 "--max-old-space-size=512",
             };
