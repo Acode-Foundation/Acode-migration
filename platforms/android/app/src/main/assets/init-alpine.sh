@@ -57,8 +57,12 @@ done
 if [ -n "$missing_packages" ]; then
     echo -e "\e[34;1m[*] \e[0mInstalling important packages\e[0m"
     apk update && apk upgrade
-    apk add $missing_packages
-    if [ $? -eq 0 ]; then
+    if ! apk add $missing_packages || ! apk info -e $required_packages >/dev/null 2>&1; then
+        echo "Failed to install required Alpine packages." >&2
+        if [ "$INSTALLING" = true ] || [ "$PREPARE" = true ]; then
+            exit 1
+        fi
+    else
         echo -e "\e[32;1m[+] \e[0mSuccessfully installed\e[0m"
     fi
     echo -e "\e[34m[*] \e[0mUse \e[32mapk\e[0m to install new packages\e[0m"

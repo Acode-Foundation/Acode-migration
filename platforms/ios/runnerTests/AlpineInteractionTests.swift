@@ -10,6 +10,8 @@ final class AlpineInteractionTests: BridgeTestCase {
             const manager = acode.require('terminal');
             const terminal = await manager.createServer({name:'Alpine orphan cleanup'});
             const parent = Number(terminal.component.pid);
+            let directory;
+            let child;
             const content = () => {
                 const buffer = terminal.component.terminal.buffer.active;
                 return Array.from({length:buffer.length}, (_, i) => buffer.getLine(i)?.translateToString()).join('\n');
@@ -21,19 +23,41 @@ final class AlpineInteractionTests: BridgeTestCase {
                 }
                 throw new Error('Orphan cleanup timed out: '+content());
             };
+            const childExited = async () => !(await Executor.listAllProcesses()).some(process => process.pid === child);
             try {
+                directory = await Executor.execute('mktemp -d /tmp/acode-orphan-test.XXXXXX', true);
                 await waitFor(() => content().includes('root@localhost'));
-                terminal.component.terminal.input(`sh -c 'trap "" HUP; echo ORPHAN:$$; sleep 2' & disown\r`);
+                terminal.component.terminal.input(`sh -c 'trap "" HUP; echo $$ > "$1/pid"; echo ORPHAN:$$; while [ ! -e "$1/release" ]; do sleep 0.1; done' sh "${directory}" & disown\r`);
                 await waitFor(() => /ORPHAN:(\d+)/.test(content()));
-                const child = Number(content().match(/ORPHAN:(\d+)/)[1]);
+                child = Number(content().match(/ORPHAN:(\d+)/)[1]);
                 terminal.component.terminal.input('exit\r');
                 await waitFor(async () => {
                     const processes = await Executor.listAllProcesses();
                     return !processes.some(process => process.pid === parent) && processes.some(process => process.pid === child);
                 });
-                await waitFor(async () => !(await Executor.listAllProcesses()).some(process => process.pid === child));
+                await Executor.execute(`touch "${directory}/release"`, true);
+                await waitFor(childExited);
                 return await Executor.execute('printf ORPHAN_CLEANUP_PASS', true);
-            } finally { await manager.close(terminal.id); }
+            } finally {
+                try {
+                    if (directory) {
+                        await Executor.execute(`touch "${directory}/release"`, true);
+                        child ||= Number(await Executor.execute(`cat "${directory}/pid" 2>/dev/null || true`, true));
+                        if (child) {
+                            try { await waitFor(childExited); }
+                            catch {
+                                await Executor.killProcess(child).catch(() => {});
+                                await waitFor(childExited);
+                            }
+                        }
+                    }
+                } finally {
+                    try { await manager.close(terminal.id); }
+                    finally {
+                        if (directory) await Executor.execute(`rm -rf "${directory}"`, true);
+                    }
+                }
+            }
             """#, arguments: [:], in: nil, contentWorld: .page) as? String
         XCTAssertEqual(result, "ORPHAN_CLEANUP_PASS")
     }
