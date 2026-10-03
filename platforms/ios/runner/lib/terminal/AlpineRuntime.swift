@@ -20,11 +20,14 @@ final class AlpineRuntime {
     var root: URL { files.data.deletingLastPathComponent().appendingPathComponent("Alpine") }
     var installed: Bool { FileManager.default.fileExists(atPath: files.data.appendingPathComponent(".configured").path) }
     var assets: URL { Bundle.main.resourceURL!.appendingPathComponent("Alpine") }
+    // Bun FFI needs JIT; optimizing and concurrent workers are unsafe in this guest.
     var environment: String {
         ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/public",
          "PREFIX=/acode", "ALPINE_ROOT=/", "TERM=xterm-256color", "SHELL=/bin/bash",
          "ANDROID_TZ=\(TimeZone.current.identifier)", "GODEBUG=asyncpreemptoff=1", "GOMAXPROCS=2",
-         "PYTHONMALLOC=malloc", "PYTHONDONTWRITEBYTECODE=1"].joined(separator: "\0") + "\0\0"
+         "PYTHONMALLOC=malloc", "PYTHONDONTWRITEBYTECODE=1",
+         "BUN_JSC_useDFGJIT=0", "BUN_JSC_useFTLJIT=0", "BUN_JSC_useConcurrentJIT=0",
+         "BUN_JSC_numberOfGCMarkers=1", "BUN_JSC_useConcurrentGC=0"].joined(separator: "\0") + "\0\0"
     }
 
     private init() {

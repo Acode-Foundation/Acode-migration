@@ -64,7 +64,7 @@ final class AlpineTerminalServerTests: BridgeTestCase {
             'http://127.0.0.1:8767' + path,
             {method:'POST', serializer:'json', responseType:'text', data},
             resolve, reject));
-        const processes = async () => (await Executor.execute('ps -o comm', true)).split('\n').map(line => line.trim());
+        const processes = async () => (await Executor.listAllProcesses()).map(process => process.name);
         const waitFor = async (check, attempts) => {
             for (let i = 0; i < attempts; i++) {
                 if (await check()) return true;

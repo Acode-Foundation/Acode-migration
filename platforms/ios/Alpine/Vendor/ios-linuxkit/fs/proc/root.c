@@ -15,7 +15,7 @@ static int proc_show_version(struct proc_entry *UNUSED(entry), struct proc_data 
 
 static int proc_show_stat(struct proc_entry *UNUSED(entry), struct proc_data *buf) {
     struct cpu_usage usage = get_cpu_usage();
-    proc_printf(buf, "cpu  %"PRIu64" %"PRIu64" %"PRIu64" %"PRIu64"\n", usage.user_ticks, usage.nice_ticks, usage.system_ticks, usage.idle_ticks);
+    proc_printf(buf, "cpu  %"PRIu64" %"PRIu64" %"PRIu64" %"PRIu64" 0 0 0 0 0 0\n", usage.user_ticks, usage.nice_ticks, usage.system_ticks, usage.idle_ticks);
 
     // calculate btime (boot time in seconds since epoch) by subtracting uptime from current time
     struct uptime_info uptime = get_uptime();

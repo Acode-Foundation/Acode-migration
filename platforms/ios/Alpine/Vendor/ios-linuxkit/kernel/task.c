@@ -81,9 +81,10 @@ struct task *task_create_(struct task *parent) {
     // Initialize blocking state for deadlock detection.
     task->blocking = false;
     {
-        struct timespec _ts;
-        clock_gettime(CLOCK_MONOTONIC, &_ts);
-        task->last_unblocked_ns = (uint64_t)_ts.tv_sec * 1000000000ULL + _ts.tv_nsec;
+        struct timespec start_time;
+        clock_gettime(CLOCK_MONOTONIC, &start_time);
+        task->last_unblocked_ns = (uint64_t)start_time.tv_sec * 1000000000ULL + start_time.tv_nsec;
+        task->start_time_ticks = (uint64_t)start_time.tv_sec * 100 + start_time.tv_nsec / 10000000;
     }
     list_init(&task->children);
     list_init(&task->siblings);

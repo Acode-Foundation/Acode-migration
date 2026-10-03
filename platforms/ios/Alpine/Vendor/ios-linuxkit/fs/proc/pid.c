@@ -66,7 +66,7 @@ static int proc_pid_stat_show(struct proc_entry *entry, struct proc_data *buf) {
     proc_printf(buf, "%ld ", 0l); // nice (also not adjustable)
     proc_printf(buf, "%ld ", list_size(&task->group->threads));
     proc_printf(buf, "%ld ", 0l); // itimer value (deprecated, always 0)
-    proc_printf(buf, "%lld ", 0ll); // jiffies on process start
+    proc_printf(buf, "%llu ", (unsigned long long) task->start_time_ticks);
 
     proc_printf(buf, "%lu ", 0l); // vsize
     proc_printf(buf, "%ld ", 0l); // rss

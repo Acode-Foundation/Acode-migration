@@ -39,7 +39,10 @@ if [ "$INSTALLING" != true ] && [ $# -gt 0 ] && [ "${1#--}" = "$1" ]; then
     exec "$@"
 fi
 
-required_packages="bash command-not-found tzdata wget"
+required_packages="bash command-not-found tzdata wget curl libstdc++"
+if [ "$ALPINE_ROOT" = "/" ]; then
+    required_packages="$required_packages procps-ng tar gzip"
+fi
 missing_packages=""
 
 installed_packages=" $(apk info -e $required_packages 2>/dev/null | tr '\n' ' ') "
