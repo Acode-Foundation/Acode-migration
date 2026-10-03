@@ -170,6 +170,7 @@ startWorkerServer(
 				}
 			},
 
+			openDocument: (uri) => workspace.documentOpened(uri),
 			closeDocument: (uri) => workspace.documentClosed(uri),
 			addWorkspaceFolder: (uri) => workspace.addFolder(uri),
 			removeWorkspaceFolder: (uri) => workspace.removeFolder(uri),

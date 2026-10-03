@@ -1,5 +1,6 @@
 import ts from "typescript";
 import { TextDocument } from "vscode-languageserver-textdocument";
+import crawl from "./crawl";
 import type ProjectFileSystem from "./fileSystem";
 import { joinPath } from "./paths";
 import ProjectHost from "./projectHost";
@@ -12,6 +13,7 @@ interface ProjectOptions {
 	documentsVersion(): string;
 	libraries: Record<string, string>;
 	registry: ts.DocumentRegistry;
+	log(message: string): void;
 }
 
 const CONFIG_FILES = ["tsconfig.json", "jsconfig.json"];
@@ -23,6 +25,7 @@ const DEPENDENCY_DIRECTORIES = new Set([
 const OUTPUT_DIRECTORIES = new Set(["build", "coverage", "dist", "out"]);
 const MAX_DIRECTORIES = 1500;
 const MAX_FILES = 3000;
+const JAVASCRIPT_FILE = /\.[cm]?jsx?$/i;
 const JSCONFIG_DEFAULTS: ts.CompilerOptions = {
 	allowJs: true,
 	maxNodeModuleJsDepth: 2,
@@ -41,6 +44,7 @@ export default class Project {
 	#openDocuments = new Map<string, TextDocument>();
 	#openDocumentsKey = "";
 	#snapshots = new Map<string, { version: number; document: TextDocument }>();
+	#configErrors = "";
 
 	constructor(options: ProjectOptions) {
 		this.#options = options;
@@ -52,6 +56,8 @@ export default class Project {
 			documentsVersion: options.documentsVersion,
 			openDocuments: () => this.#documentsByPath(),
 		});
+		// Inferred defaults until the config is read, so open files work at once.
+		this.#host.configure(compilerDefaults(), []);
 		this.service = ts.createLanguageService(this.#host, options.registry);
 	}
 
@@ -80,7 +86,7 @@ export default class Project {
 			await fs.read(this.#configPath);
 		}
 		this.refresh();
-		this.#sourceFiles = await fs.crawl(this.root, {
+		this.#sourceFiles = await crawl(fs, this.root, {
 			skipDirectory: (name) =>
 				name.startsWith(".") ||
 				DEPENDENCY_DIRECTORIES.has(name) ||
@@ -107,11 +113,20 @@ export default class Project {
 			{ ...parsed.options, noEmit: true },
 			parsed.fileNames.slice(0, MAX_FILES),
 		);
+		if (this.#loaded) this.#reportConfigErrors(parsed.errors);
 	}
 
 	pathOf(uri: string): string | undefined {
 		const path = this.#options.fs.pathOf(uri);
 		return path?.startsWith(`${this.root}/`) ? path : undefined;
+	}
+
+	/** A program without `allowJs` cannot hold JavaScript, as in tsserver. */
+	accepts(fileName: string): boolean {
+		return (
+			!JAVASCRIPT_FILE.test(fileName) ||
+			this.#host.getCompilationSettings().allowJs === true
+		);
 	}
 
 	uriOf(fileName: string): string | undefined {
@@ -148,9 +163,11 @@ export default class Project {
 			useCaseSensitiveFileNames: true,
 			fileExists: (path) => fs.fileExists(path),
 			readFile: (path) => fs.readFile(path),
+			// Only what the budgeted crawl listed, so include globs cannot
+			// enumerate past the directory cap.
 			readDirectory: (path, extensions, excludes, includes, depth) =>
 				readDirectory(
-					fs,
+					(directory) => fs.listedEntries(directory),
 					this.root,
 					path,
 					extensions,
@@ -171,6 +188,15 @@ export default class Project {
 		);
 	}
 
+	#reportConfigErrors(errors: readonly ts.Diagnostic[]): void {
+		const message = errors
+			.map((error) => ts.flattenDiagnosticMessageText(error.messageText, "\n"))
+			.join("\n");
+		if (message === this.#configErrors) return;
+		this.#configErrors = message;
+		if (message) this.#options.log(`${this.#configPath}: ${message}`);
+	}
+
 	#documentsByPath(): Map<string, TextDocument> {
 		const key = `${this.#options.documentsVersion()}:${this.#options.fs.version}`;
 		if (key === this.#openDocumentsKey) return this.#openDocuments;
@@ -178,7 +204,7 @@ export default class Project {
 		this.#openDocuments = new Map();
 		for (const [uri, document] of this.#options.documents) {
 			const path = this.pathOf(uri);
-			if (path) this.#openDocuments.set(path, document);
+			if (path && this.accepts(path)) this.#openDocuments.set(path, document);
 		}
 		return this.#openDocuments;
 	}

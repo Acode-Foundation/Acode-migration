@@ -19,6 +19,7 @@ import Uri from "utils/Uri";
 import Url from "utils/Url";
 import config from "./config";
 import * as FileList from "./fileList";
+import iosGuestPath from "./iosGuestPath";
 import { loadFileBrowser } from "./lazyImports";
 import openFile from "./openFile";
 import platform from "./platform";
@@ -53,7 +54,7 @@ const isTerminalAccessiblePath = (url = "") => {
 };
 
 const convertToProotPath = (url = "") => {
-	if (platform.isIOS) return convertToIOSGuestPath(url);
+	if (platform.isIOS) return iosGuestPath(url);
 	const { alpineRoot, publicDir } = getTerminalPaths();
 	if (isAcodeTerminalPublicSafUri(url)) {
 		try {
@@ -92,14 +93,6 @@ const convertToProotPath = (url = "") => {
 	}
 	console.warn(`Unrecognized path for terminal conversion: ${url}`);
 	return cleanUrl;
-};
-
-const convertToIOSGuestPath = (url = "") => {
-	const publicUrl = `${Bridge.file.dataDirectory}public`;
-	if (url === publicUrl || url.startsWith(`${publicUrl}/`)) {
-		return decodeURIComponent(`/public${url.slice(publicUrl.length)}`);
-	}
-	return decodeURIComponent(new URL(url).pathname);
 };
 
 /**

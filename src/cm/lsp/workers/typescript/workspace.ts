@@ -44,7 +44,7 @@ export default class TypeScriptWorkspace {
 		const host = new DocumentHost(
 			options.documents,
 			options.libraries,
-			(uri) => !!this.#projectFor(uri),
+			(uri) => !!this.#claim(uri),
 			() => `${options.documentsVersion()}:${this.#fs.version}`,
 		);
 		this.#fallback = ts.createLanguageService(host, this.#registry);
@@ -53,7 +53,7 @@ export default class TypeScriptWorkspace {
 	addFolder(url: string): void {
 		const key = trimSlash(url);
 		if (!key || REMOTE_FOLDER.test(key) || this.#projects.has(key)) return;
-		const root = `/ws${this.#nextRoot++}`;
+		const root = filePath(key) ?? `/ws${this.#nextRoot++}`;
 		this.#fs.addRoot(root, key);
 		const project = new Project({
 			fs: this.#fs,
@@ -62,6 +62,7 @@ export default class TypeScriptWorkspace {
 			documentsVersion: this.#options.documentsVersion,
 			libraries: this.#options.libraries,
 			registry: this.#registry,
+			log: this.#options.log,
 		});
 		this.#projects.set(key, project);
 		// Started lazily so a single file passed as the root never flashes one.
@@ -103,9 +104,9 @@ export default class TypeScriptWorkspace {
 	}
 
 	target(document: TextDocument): ServiceTarget {
-		const project = this.#projectFor(document.uri);
-		const fileName = project?.pathOf(document.uri);
-		if (project && fileName) {
+		const claim = this.#claim(document.uri);
+		if (claim) {
+			const { project, fileName } = claim;
 			return {
 				service: project.service,
 				document,
@@ -126,6 +127,19 @@ export default class TypeScriptWorkspace {
 		};
 	}
 
+	/** New files are absent from cached listings until their folder is re-listed. */
+	documentOpened(uri: string): void {
+		let owner: [string, Project] | undefined;
+		for (const entry of this.#projects) {
+			if (
+				uri.startsWith(entry[0]) &&
+				entry[0].length > (owner?.[0].length ?? 0)
+			)
+				owner = entry;
+		}
+		if (owner) void this.#fs.locate(uri, owner[1].root);
+	}
+
 	/** A closed tab may hold unsaved text; reread the file from disk next time. */
 	documentClosed(uri: string): void {
 		const path = this.#fs.pathOf(uri);
@@ -142,9 +156,10 @@ export default class TypeScriptWorkspace {
 		this.#fallback.dispose();
 	}
 
-	#projectFor(uri: string): Project | undefined {
+	#claim(uri: string): { project: Project; fileName: string } | undefined {
 		for (const project of this.#projects.values()) {
-			if (project.pathOf(uri)) return project;
+			const fileName = project.pathOf(uri);
+			if (fileName && project.accepts(fileName)) return { project, fileName };
 		}
 		return undefined;
 	}
@@ -162,4 +177,13 @@ export default class TypeScriptWorkspace {
 
 function folderName(url: string): string {
 	return decodeURIComponent(url.slice(url.lastIndexOf("/") + 1)) || url;
+}
+
+/**
+ * `file:` folders keep their real path, so references above the folder, such
+ * as `extends: "../tsconfig.base.json"`, resolve. Other providers' URIs are
+ * opaque and get an isolated root.
+ */
+function filePath(url: string): string | undefined {
+	return url.startsWith("file:///") ? url.slice("file://".length) : undefined;
 }

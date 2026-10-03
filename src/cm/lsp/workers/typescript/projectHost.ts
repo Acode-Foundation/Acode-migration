@@ -113,7 +113,15 @@ export default class ProjectHost implements ts.LanguageServiceHost {
 		depth?: number,
 	): string[] {
 		const { fs, root } = this.#options;
-		return readDirectory(fs, root, path, extensions, exclude, include, depth);
+		return readDirectory(
+			(directory) => fs.getEntries(directory),
+			root,
+			path,
+			extensions,
+			exclude,
+			include,
+			depth,
+		);
 	}
 
 	realpath(path: string): string {

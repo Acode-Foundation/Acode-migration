@@ -114,6 +114,7 @@ export interface WorkerLanguageAdapter {
 		params: unknown,
 	): unknown | PromiseLike<unknown> | typeof METHOD_NOT_HANDLED;
 	configure?(settings: unknown): void;
+	openDocument?(uri: string): void;
 	closeDocument?(uri: string): void;
 	addWorkspaceFolder?(uri: string): void;
 	removeWorkspaceFolder?(uri: string): void;
@@ -310,6 +311,7 @@ function didOpen(params: DidOpenParams): void {
 	);
 	documents.set(item.uri, document);
 	projectVersion++;
+	adapter?.openDocument?.(item.uri);
 	scheduleValidation(item.uri);
 }
 

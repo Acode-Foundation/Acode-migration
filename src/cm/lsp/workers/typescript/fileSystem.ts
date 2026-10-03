@@ -1,17 +1,11 @@
 import type { DirectoryEntry } from "../protocol";
+import FileRoots from "./fileRoots";
 import { baseName, joinPath, parentOf, trimSlash } from "./paths";
+import TaskQueue from "./taskQueue";
 
 export interface FileSystemHost {
 	readDirectory(url: string): Promise<DirectoryEntry[]>;
 	readFile(url: string): Promise<string>;
-}
-
-export interface CrawlOptions {
-	skipDirectory(name: string): boolean;
-	includeFile(name: string): boolean;
-	maxDirectories: number;
-	maxFiles: number;
-	onProgress?(directories: number, files: number): void;
 }
 
 interface DirectoryNode {
@@ -29,6 +23,7 @@ interface FileNode {
 }
 
 const CONCURRENCY = 4;
+const MAX_RELOAD_DEPTH = 8;
 const CHANGE_DELAY = 150;
 
 /**
@@ -39,12 +34,11 @@ const CHANGE_DELAY = 150;
 export default class ProjectFileSystem {
 	#host: FileSystemHost;
 	#onChange: () => void;
-	#roots = new Map<string, string>();
+	#roots = new FileRoots();
+	#queue = new TaskQueue(CONCURRENCY);
 	#directories = new Map<string, DirectoryNode>();
 	#files = new Map<string, FileNode>();
 	#paths = new Map<string, string>();
-	#queue: Array<() => Promise<void>> = [];
-	#active = 0;
 	#version = 0;
 	#timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -58,18 +52,22 @@ export default class ProjectFileSystem {
 	}
 
 	get busy(): boolean {
-		return this.#active > 0 || this.#queue.length > 0;
+		return this.#queue.busy;
 	}
 
 	addRoot(path: string, url: string): void {
-		this.#roots.set(path, url);
-		this.#directories.set(path, { url });
+		this.#roots.add(path, url);
+		this.#directories.set(path, this.#directories.get(path) ?? { url });
 		this.#paths.set(trimSlash(url), path);
 	}
 
 	removeRoot(path: string): void {
 		this.#roots.delete(path);
-		const inside = (key: string) => key === path || key.startsWith(`${path}/`);
+		const roots = this.#roots.paths();
+		// Nested file roots share real paths; keep what another root still uses.
+		const inside = (key: string) =>
+			(key === path || key.startsWith(`${path}/`)) &&
+			!roots.some((root) => key === root || key.startsWith(`${root}/`));
 		for (const key of this.#directories.keys()) {
 			if (inside(key)) this.#directories.delete(key);
 		}
@@ -83,20 +81,26 @@ export default class ProjectFileSystem {
 	}
 
 	pathOf(url: string): string | undefined {
-		return this.#paths.get(trimSlash(url));
+		const key = trimSlash(url);
+		return this.#paths.get(key) ?? this.#roots.pathOf(key);
 	}
 
 	urlOf(path: string): string | undefined {
 		const parent = this.#directories.get(parentOf(path));
 		return (
 			this.#directories.get(path)?.url ??
-			parent?.children?.get(baseName(path))?.url
+			parent?.children?.get(baseName(path))?.url ??
+			(this.#roots.contains(path) ? this.#roots.urlOf(path) : undefined)
 		);
 	}
 
 	directoryExists(path: string): boolean {
 		const target = trimSlash(path);
-		return target === "/" || !!this.#entry(target)?.isDirectory;
+		return (
+			target === "/" ||
+			this.#directories.has(target) ||
+			!!this.#entry(target)?.isDirectory
+		);
 	}
 
 	fileExists(path: string): boolean {
@@ -119,23 +123,57 @@ export default class ProjectFileSystem {
 	}
 
 	getEntries(path: string): { files: string[]; directories: string[] } {
-		const files: string[] = [];
-		const directories: string[] = [];
-		for (const entry of this.#children(trimSlash(path))?.values() ?? []) {
-			(entry.isDirectory ? directories : files).push(entry.name);
-		}
-		return { files, directories };
+		return splitEntries(this.#children(trimSlash(path)));
 	}
 
-	/** Drop cached content so the next read comes from the host again. */
+	/** Entries already listed, without fetching more; keeps scans in budget. */
+	listedEntries(path: string): { files: string[]; directories: string[] } {
+		return splitEntries(this.#directories.get(trimSlash(path))?.children);
+	}
+
+	/**
+	 * Drop cached content so the next read comes from the host again. The
+	 * version keeps rising so text derived from the old content is never
+	 * mistaken for the new one.
+	 */
 	invalidate(path: string): void {
-		if (this.#files.delete(path)) this.#changed();
+		const node = this.#files.get(path);
+		if (!node) return;
+		node.text = undefined;
+		node.failed = undefined;
+		node.version++;
+		this.#changed();
+	}
+
+	/**
+	 * Map a URL that listings have not reported yet, such as a newly created
+	 * file: re-list the nearest known folder and walk down from there. Paths
+	 * always come from provider listings, so opaque URIs map correctly.
+	 */
+	async locate(url: string, root?: string): Promise<string | undefined> {
+		const key = trimSlash(url);
+		const known = this.pathOf(key);
+		if (known) {
+			await this.list(parentOf(known));
+			if (!this.#listedEntry(known)) await this.#reload(parentOf(known));
+			return known;
+		}
+		let directory = this.#ancestorOf(key) ?? root;
+		while (directory) {
+			await this.#reload(directory);
+			const path = this.pathOf(key);
+			if (path) return path;
+			const deeper = this.#ancestorOf(key);
+			if (!deeper || deeper === directory) return undefined;
+			directory = deeper;
+		}
+		return undefined;
 	}
 
 	async list(path: string): Promise<Map<string, DirectoryEntry> | undefined> {
 		const node = this.#directory(path);
 		if (!node || node.failed) return undefined;
-		return node.children ?? this.#loadDirectory(path, node);
+		return node.children ?? node.loading ?? this.#loadDirectory(path, node);
 	}
 
 	async read(path: string): Promise<string | undefined> {
@@ -146,39 +184,15 @@ export default class ProjectFileSystem {
 		return node?.loading ?? this.#loadFile(path, entry.url);
 	}
 
-	async crawl(root: string, options: CrawlOptions): Promise<string[]> {
-		const files: string[] = [];
-		let level = [root];
-		let visited = 0;
-		while (level.length && visited < options.maxDirectories) {
-			const batch = level.slice(0, options.maxDirectories - visited);
-			visited += batch.length;
-			const listings = await Promise.all(batch.map((dir) => this.list(dir)));
-			level = [];
-			batch.forEach((dir, index) => {
-				for (const entry of listings[index]?.values() ?? []) {
-					const child = joinPath(dir, entry.name);
-					if (entry.isDirectory) {
-						if (!options.skipDirectory(entry.name)) level.push(child);
-					} else if (
-						files.length < options.maxFiles &&
-						options.includeFile(entry.name)
-					) {
-						files.push(child);
-					}
-				}
-			});
-			options.onProgress?.(visited, files.length);
-		}
-		return files;
-	}
-
 	#entry(path: string): DirectoryEntry | undefined {
 		return this.#children(parentOf(path))?.get(baseName(path));
 	}
 
+	#listedEntry(path: string): DirectoryEntry | undefined {
+		return this.#directories.get(parentOf(path))?.children?.get(baseName(path));
+	}
+
 	#children(path: string): Map<string, DirectoryEntry> | undefined {
-		if (path === "/") return this.#rootEntries();
 		const node = this.#directory(path);
 		if (!node || node.failed) return undefined;
 		if (!node.children && !node.loading) void this.#loadDirectory(path, node);
@@ -187,28 +201,53 @@ export default class ProjectFileSystem {
 
 	#directory(path: string): DirectoryNode | undefined {
 		const known = this.#directories.get(path);
-		if (known || path === "/") return known;
-		const entry = this.#entry(path);
-		if (!entry?.isDirectory) return undefined;
-		const node: DirectoryNode = { url: entry.url };
+		if (known) return known;
+		// Parents of a file root exist even when their own parent is unreadable,
+		// so shared configs and hoisted node_modules above the root resolve.
+		const url = this.#roots.isAbove(path)
+			? this.#roots.urlOf(path)
+			: this.#listedDirectoryUrl(path);
+		if (!url) return undefined;
+		const node: DirectoryNode = { url };
 		this.#directories.set(path, node);
 		return node;
 	}
 
-	#rootEntries(): Map<string, DirectoryEntry> {
-		const entries = new Map<string, DirectoryEntry>();
-		for (const [path, url] of this.#roots) {
-			const name = baseName(path);
-			entries.set(name, { name, url, isDirectory: true });
+	#listedDirectoryUrl(path: string): string | undefined {
+		if (path === "/") return undefined;
+		const entry = this.#entry(path);
+		return entry?.isDirectory ? entry.url : undefined;
+	}
+
+	async #reload(path: string, depth = 0): Promise<boolean> {
+		let node = this.#directory(path);
+		if (!node && path !== "/" && depth < MAX_RELOAD_DEPTH) {
+			if (!(await this.#reload(parentOf(path), depth + 1))) return false;
+			node = this.#directory(path);
 		}
-		return entries;
+		if (!node) return false;
+		if (node.loading) await node.loading;
+		node.failed = undefined;
+		await this.#loadDirectory(path, node);
+		return !node.failed;
+	}
+
+	#ancestorOf(url: string): string | undefined {
+		let current = url;
+		for (let index = current.lastIndexOf("/"); index > 0; ) {
+			current = current.slice(0, index);
+			const path = this.pathOf(current);
+			if (path) return path;
+			index = current.lastIndexOf("/");
+		}
+		return undefined;
 	}
 
 	#loadDirectory(
 		path: string,
 		node: DirectoryNode,
 	): Promise<Map<string, DirectoryEntry> | undefined> {
-		node.loading = this.#enqueue(async () => {
+		node.loading = this.#queue.run(async () => {
 			try {
 				const children = new Map<string, DirectoryEntry>();
 				for (const entry of await this.#host.readDirectory(node.url)) {
@@ -229,7 +268,7 @@ export default class ProjectFileSystem {
 	#loadFile(path: string, url: string): Promise<string | undefined> {
 		const node: FileNode = this.#files.get(path) ?? { version: 0 };
 		this.#files.set(path, node);
-		node.loading = this.#enqueue(async () => {
+		node.loading = this.#queue.run(async () => {
 			try {
 				node.text = await this.#host.readFile(url);
 				node.version++;
@@ -243,24 +282,6 @@ export default class ProjectFileSystem {
 		return node.loading;
 	}
 
-	#enqueue<T>(task: () => Promise<T>): Promise<T> {
-		return new Promise((resolve, reject) => {
-			this.#queue.push(() => task().then(resolve, reject));
-			this.#drain();
-		});
-	}
-
-	#drain(): void {
-		while (this.#active < CONCURRENCY && this.#queue.length) {
-			const job = this.#queue.shift()!;
-			this.#active++;
-			void job().finally(() => {
-				this.#active--;
-				this.#drain();
-			});
-		}
-	}
-
 	#changed(): void {
 		this.#version++;
 		if (this.#timer) clearTimeout(this.#timer);
@@ -269,4 +290,13 @@ export default class ProjectFileSystem {
 			this.#onChange();
 		}, CHANGE_DELAY);
 	}
+}
+
+function splitEntries(children: Map<string, DirectoryEntry> | undefined) {
+	const files: string[] = [];
+	const directories: string[] = [];
+	for (const entry of children?.values() ?? []) {
+		(entry.isDirectory ? directories : files).push(entry.name);
+	}
+	return { files, directories };
 }

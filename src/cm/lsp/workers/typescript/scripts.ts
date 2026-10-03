@@ -1,5 +1,9 @@
 import ts from "typescript";
-import type ProjectFileSystem from "./fileSystem";
+
+interface FileSystemEntries {
+	files: readonly string[];
+	directories: readonly string[];
+}
 
 type MatchFiles = (
 	path: string,
@@ -9,10 +13,7 @@ type MatchFiles = (
 	useCaseSensitiveFileNames: boolean,
 	currentDirectory: string,
 	depth: number | undefined,
-	getFileSystemEntries: (path: string) => {
-		files: readonly string[];
-		directories: readonly string[];
-	},
+	getFileSystemEntries: (path: string) => FileSystemEntries,
 	realpath: (path: string) => string,
 ) => string[];
 
@@ -42,7 +43,7 @@ export function compilerDefaults(): ts.CompilerOptions {
 }
 
 export function readDirectory(
-	fs: ProjectFileSystem,
+	getEntries: (path: string) => FileSystemEntries,
 	currentDirectory: string,
 	path: string,
 	extensions?: readonly string[],
@@ -59,7 +60,7 @@ export function readDirectory(
 		true,
 		currentDirectory,
 		depth,
-		(directory) => fs.getEntries(directory),
+		getEntries,
 		(file) => file,
 	);
 }
