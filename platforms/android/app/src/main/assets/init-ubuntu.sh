@@ -153,6 +153,73 @@ sync_timezone() {
 }
 
 # ============================================================
+# Fix Nodejs double free error on proot
+# ============================================================
+
+install_node_jemalloc_hook() {
+    mkdir -p /etc/apt/apt.conf.d /usr/local/bin
+
+    if [ ! -e /etc/apt/apt.conf.d/99node-hook ]; then
+        cat > /etc/apt/apt.conf.d/99node-hook <<'EOF'
+DPkg::Post-Invoke {
+    "if [ -x /usr/bin/node ]; then /usr/local/bin/node-postinstall.sh; fi";
+};
+EOF
+    fi
+
+    if [ ! -e /usr/local/bin/node-postinstall.sh ]; then
+        cat > /usr/local/bin/node-postinstall.sh <<'EOF'
+#!/bin/sh
+
+# Re-applied after every dpkg run and on every sandbox launch. dpkg puts a real
+# binary back on upgrade, so the ELF magic decides whether the wrapper is still
+# needed.
+
+[ -e /usr/bin/node ] || exit 0
+
+# `file` is not part of this rootfs, so read the ELF magic directly.
+if [ "$(od -An -c -N4 /usr/bin/node 2>/dev/null | tr -d ' ')" != "177ELF" ]; then
+    exit 0
+fi
+
+JEMALLOC=""
+
+for path in \
+    /usr/lib/*/libjemalloc.so* \
+    /usr/lib/libjemalloc.so* \
+    /lib/*/libjemalloc.so* \
+    /lib/libjemalloc.so*; do
+    if [ -e "$path" ]; then
+        JEMALLOC="$path"
+        break
+    fi
+done
+
+[ -n "$JEMALLOC" ] || exit 0
+
+echo "[node-hook] Wrapping /usr/bin/node with $JEMALLOC"
+
+mv -f /usr/bin/node /usr/bin/node.distrib
+
+cat > /usr/bin/node <<WRAP
+#!/bin/sh
+LD_PRELOAD=$JEMALLOC exec /usr/bin/node.distrib "\$@"
+WRAP
+
+chmod +x /usr/bin/node
+EOF
+
+        chmod +x /usr/local/bin/node-postinstall.sh
+    fi
+}
+
+run_node_jemalloc_hook() {
+    [ -x /usr/local/bin/node-postinstall.sh ] || return 0
+
+    /usr/local/bin/node-postinstall.sh
+}
+
+# ============================================================
 # One-time rootfs installation
 #
 # IMPORTANT:
@@ -179,17 +246,26 @@ if [ "$INSTALLING" = true ]; then
         echo "[+] Timezone: UTC"
     fi
 
-    # The rootfs ships no tzdata, so /etc/localtime cannot resolve until it is
-    # installed. Best effort and time-bounded so an offline install still works.
-    if [ ! -d /usr/share/zoneinfo ]; then
-        APT_TIMEOUT=""
-        command -v timeout >/dev/null 2>&1 && APT_TIMEOUT="timeout 60"
+    # Deployed before the first package install so a later `apt install nodejs`
+    # already finds the dpkg hook in place.
+    install_node_jemalloc_hook
 
+    # tzdata lets /etc/localtime resolve and libjemalloc2 backs the Node.js
+    # wrapper. Best effort and time-bounded so an offline install still works.
+    APT_TIMEOUT=""
+    command -v timeout >/dev/null 2>&1 && APT_TIMEOUT="timeout 60"
+
+    APT_PACKAGES=""
+    [ -d /usr/share/zoneinfo ] || APT_PACKAGES="tzdata"
+    dpkg -s libjemalloc2 >/dev/null 2>&1 || APT_PACKAGES="$APT_PACKAGES libjemalloc2"
+
+    if [ -n "$APT_PACKAGES" ]; then
         $APT_TIMEOUT apt-get update >/dev/null 2>&1 || true
-        $APT_TIMEOUT apt-get install -y tzdata >/dev/null 2>&1 || true
+        $APT_TIMEOUT apt-get install -y $APT_PACKAGES >/dev/null 2>&1 || true
     fi
 
     sync_timezone
+    run_node_jemalloc_hook
 
     # --------------------------------------------------------
     # Rootfs filesystem setup
@@ -553,9 +629,12 @@ if [ "$FAILSAFE" = true ]; then
 fi
 
 # Runs on every launch too, so existing rootfs installs pick up new GIDs (and
-# any group Android grants later) without reinstalling the sandbox.
+# any group Android grants later) without reinstalling the sandbox, and so the
+# Node.js jemalloc hook reaches installs made before it existed.
 register_android_groups
 sync_timezone
+install_node_jemalloc_hook
+run_node_jemalloc_hook
 
 # AXS splits the `-c` string on whitespace and resolves the FIRST token as the
 # program (src/terminal/handlers.rs: cmd.split_whitespace()). A leading `exec`
