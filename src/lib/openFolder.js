@@ -19,8 +19,10 @@ import Uri from "utils/Uri";
 import Url from "utils/Url";
 import config from "./config";
 import * as FileList from "./fileList";
+import iosGuestPath from "./iosGuestPath";
 import { loadFileBrowser } from "./lazyImports";
 import openFile from "./openFile";
+import platform from "./platform";
 import recents from "./recents";
 import appSettings from "./settings";
 
@@ -40,6 +42,8 @@ const getTerminalPaths = () => {
 };
 
 const isTerminalAccessiblePath = (url = "") => {
+	// iOS Alpine bind-mounts every app root at its host path.
+	if (platform.isIOS) return /^(file|alpine):\/\//.test(url);
 	if (isAcodeTerminalPublicSafUri(url)) return true;
 	const { alpineRoot, publicDir } = getTerminalPaths();
 	const cleanUrl = url.replace(/^file:\/\//, "");
@@ -50,6 +54,7 @@ const isTerminalAccessiblePath = (url = "") => {
 };
 
 const convertToProotPath = (url = "") => {
+	if (platform.isIOS) return iosGuestPath(url);
 	const { alpineRoot, publicDir } = getTerminalPaths();
 	if (isAcodeTerminalPublicSafUri(url)) {
 		try {
