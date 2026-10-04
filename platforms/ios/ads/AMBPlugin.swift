@@ -86,7 +86,7 @@ final class AMBPlugin: BaseService {
             guard privacy.canRequestAds else { ctx.reject("Gather ad consent before requesting ads"); return }
             guard let ad = ctx.optAdOrError() else { return }
             if action == "adLoad" { ad.load(ctx) }
-            else if ad.isLoaded() { ad.show(ctx) }
+            else if ad is AMBBanner || ad.isLoaded() { ad.show(ctx) }
             else { ctx.resolve(false) }
         case "adHide": ctx.optAdOrError()?.hide(ctx)
         case "bannerConfig": banners.configure(ctx)

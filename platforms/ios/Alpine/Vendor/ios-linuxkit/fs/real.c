@@ -452,8 +452,14 @@ int realfs_link(struct mount *mount, const char *src, const char *dst) {
 
 int realfs_unlink(struct mount *mount, const char *path) {
     int res = unlinkat(mount->root_fd, fix_path(path), 0);
-    if (res < 0)
-        return errno_map();
+    if (res < 0) {
+        int err = errno_map();
+        struct statbuf stat;
+        // Darwin reports EPERM for directories; Linux callers expect EISDIR.
+        if (err == _EPERM && realfs_stat(mount, path, &stat) == 0 && S_ISDIR(stat.mode))
+            return _EISDIR;
+        return err;
+    }
     return res;
 }
 

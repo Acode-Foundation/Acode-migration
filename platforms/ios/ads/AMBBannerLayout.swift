@@ -44,9 +44,11 @@ final class AMBBannerLayout {
         let bottom = min(safe.maxY, root.keyboardLayoutGuide.layoutFrame.minY)
         var topHeight: CGFloat = 0
         var bottomHeight: CGFloat = 0
-        for banner in banners where banner.visible && banner.isActive {
+        for banner in banners where banner.visible && banner.isActive && banner.isLoaded() {
             banner.updateSize()
             guard let view = banner.bannerView else { continue }
+            if view.superview !== root { root.addSubview(view) }
+            view.isHidden = false
             let size = view.adSize.size
             var y: CGFloat
             if let offset = banner.offset {

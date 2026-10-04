@@ -148,7 +148,7 @@ final class AdsBridgeTests: BridgeTestCase {
         }
     }
 
-    private func host() async throws -> (WebViewController, AMBPlugin) {
+    func host() async throws -> (WebViewController, AMBPlugin) {
         let webView = try await appWebView()
         var responder: UIResponder? = webView
         while responder != nil, !(responder is WebViewController) { responder = responder?.next }
@@ -156,18 +156,19 @@ final class AdsBridgeTests: BridgeTestCase {
         return (controller, try XCTUnwrap(controller.bridge.adsService))
     }
 
-    private func context(_ plugin: AMBPlugin, id: String, options: [String: Any] = [:]) -> AMBContext {
+    func context(_ plugin: AMBPlugin, id: String, options: [String: Any] = [:]) -> AMBContext {
         var args: [String: Any] = ["id": id, "adUnitId": "ca-app-pub-3940256099942544/2934735716", "cls": "BannerAd"]
         args.merge(options) { _, new in new }
         return AMBContext(plugin, [args], Callback(id: 0, webView: nil))
     }
 
-    private func banner(_ plugin: AMBPlugin, id: String, position: String) throws -> AMBBanner {
+    func banner(_ plugin: AMBPlugin, id: String, position: String, loaded: Bool = true) throws -> AMBBanner {
         let ctx = context(plugin, id: id, options: ["position": position, "size": 0])
         let ad = try XCTUnwrap(AMBBanner(ctx))
         ad.makeBanner = { OfflineBanner(adSize: $0) }
         plugin.ads[id] = ad
         ad.load(ctx)
+        if loaded { ad.bannerViewDidReceiveAd(try XCTUnwrap(ad.bannerView)) }
         return ad
     }
 }

@@ -637,6 +637,22 @@ int __do_execve(const char *file, struct exec_args argv, struct exec_args envp) 
 
     update_thread_name();
 
+    // Like Linux's unshare_files(), give the new image a private descriptor
+    // table before closing close-on-exec fds. Threads that shared it through
+    // CLONE_FILES keep the old table: Node's tsc launcher execs from the main
+    // thread while V8 workers sit in epoll_wait on a close-on-exec epoll fd,
+    // and closing it under them makes libuv abort on EBADF.
+    if (current->files->refcount > 1) {
+        struct fdtable *files = fdtable_copy(current->files);
+        if (!IS_ERR(files)) {
+            lock(&pids_lock);
+            struct fdtable *shared = current->files;
+            current->files = files;
+            unlock(&pids_lock);
+            fdtable_release(shared);
+        }
+    }
+
     // cloexec
     // consider putting this in fd.c?
     fdtable_do_cloexec(current->files);
@@ -832,6 +848,7 @@ dword_t sys_execve(addr_t filename_addr, addr_t argv_addr, addr_t envp_addr) {
 
             static const char *inject_args_base[] = {
                 "--jitless",
+                "--no-expose-wasm",
                 "--no-lazy",
                 "--max-old-space-size=512",
             };

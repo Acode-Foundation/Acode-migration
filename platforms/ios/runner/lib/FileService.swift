@@ -101,14 +101,21 @@ final class FileService: BaseService {
     }
 
     private func paths() -> [String: Any] {
-        ["applicationDirectory": files.application.absoluteString + "/",
-         "applicationStorageDirectory": URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true).absoluteString,
-         "dataDirectory": files.data.absoluteString + "/",
-         "cacheDirectory": files.cache.absoluteString + "/",
-         "tempDirectory": files.temporary.absoluteString,
-         "documentsDirectory": files.documents.absoluteString + "/",
+        ["applicationDirectory": directoryURL(files.application),
+         "applicationStorageDirectory": directoryURL(URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)),
+         "dataDirectory": directoryURL(files.data),
+         "cacheDirectory": directoryURL(files.cache),
+         "tempDirectory": directoryURL(files.temporary),
+         "documentsDirectory": directoryURL(files.documents),
          "syncedDataDirectory": NSNull(), "sharedDirectory": NSNull(),
          "externalApplicationStorageDirectory": NSNull(), "externalDataDirectory": NSNull(),
          "externalCacheDirectory": NSNull(), "externalRootDirectory": NSNull()]
+    }
+
+    // FileManager directory URLs already end in "/"; entries resolve to single-slash URLs, so the
+    // roots must too or JS prefix checks against them never match.
+    private func directoryURL(_ url: URL) -> String {
+        let string = url.absoluteString
+        return string.hasSuffix("/") ? string : string + "/"
     }
 }

@@ -1,4 +1,25 @@
-# Local plugin fixture
+# Local fixtures
+
+`halfword-lanes.elf` checks all eight ARM64 halfword lanes for loads and stores
+with ordinary, immediate post-indexed and register post-indexed addressing.
+Rebuild it from the repository root with LLVM and LLD:
+
+```sh
+clang --target=aarch64-linux-gnu -c platforms/ios/Alpine/Tests/halfword-lanes.S -o /tmp/halfword-lanes.o
+ld.lld -static --strip-all -e _start /tmp/halfword-lanes.o -o platforms/ios/runnerTests/Fixtures/halfword-lanes.elf
+```
+
+`fault-signals.elf` checks blocked, ignored and handled synchronous `SIGSEGV` and
+`SIGILL`, plus ordinary blocked signals remaining pending until unblocked.
+Fatal faults must exit with the signal's status; handlers exit with status 42.
+Rebuild it with:
+
+```sh
+clang --target=aarch64-linux-gnu -c platforms/ios/Alpine/Tests/fault-signals.S -o /tmp/fault-signals.o
+ld.lld -static --strip-all -e _start /tmp/fault-signals.o -o platforms/ios/runnerTests/Fixtures/fault-signals.elf
+```
+
+## Plugin fixture
 
 `install-plugin.zip` is a disposable plugin with ID `app.acode.ios-install-fixture`.
 It contains its manifest, `main.js`, a short readme, Acode's existing generic plugin

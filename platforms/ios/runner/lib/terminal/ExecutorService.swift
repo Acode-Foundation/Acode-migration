@@ -56,7 +56,7 @@ class ExecutorService: BaseService {
     }
 
     private func listAllProcesses(_ callback: Callback) throws {
-        try runtime.start("ps -o pid,ppid,comm,args", completion: { status, output, errors in
+        try runtime.start("busybox ps -o pid,ppid,comm,args", completion: { status, output, errors in
             guard status == 0 else { callback.error(errors); return }
             let rows: [[String: Any]] = output.split(separator: "\n").dropFirst().compactMap { line in
                 let fields = line.split(maxSplits: 3, whereSeparator: \.isWhitespace)

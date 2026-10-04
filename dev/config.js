@@ -1,9 +1,38 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const ads = require("../ads.json");
 const ID_PAID = "com.foxdebug.acode";
 const ID_FREE = "com.foxdebug.acodefree";
 
-module.exports = { getAppConfig, getWebBundlePath };
+module.exports = { getAppConfig, getWebBundlePath, getAdConfig };
+
+function getAdConfig(platform, mode) {
+	const release = mode === "Release";
+	const config = ads[platform]?.[release ? "production" : "test"];
+	if (!config) throw new Error(`Unsupported advertising platform: ${platform}`);
+	for (const name of [
+		"appId",
+		"banner",
+		"interstitial",
+		"rewarded",
+		"academyRewarded",
+		"academyInterstitial",
+		"appOpen",
+	]) {
+		const id = config[name];
+		const separator = name === "appId" ? "~" : "/";
+		const pattern = new RegExp(`^ca-app-pub-\\d{16}${separator}\\d{10}$`);
+		if (
+			!pattern.test(id) ||
+			(release && id.startsWith("ca-app-pub-3940256099942544"))
+		) {
+			throw new Error(
+				`Invalid ${platform} ${name} ID in ads.json for ${mode}.`,
+			);
+		}
+	}
+	return config;
+}
 
 function getAppConfig(platform = process.env.ACODE_PLATFORM || "android") {
 	const { androidPackageId, appleAppId } = JSON.parse(
