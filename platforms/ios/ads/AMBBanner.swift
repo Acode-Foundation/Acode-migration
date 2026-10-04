@@ -8,6 +8,8 @@ final class AMBBanner: AMBAdBase, BannerViewDelegate, AdSizeDelegate {
     let offset: CGFloat?
     private(set) var bannerView: BannerView?
     private(set) var visible = false
+    private enum LoadState { case idle, loading, loaded }
+    private var loadState = LoadState.idle
 
     override init?(_ ctx: AMBContext) {
         options = ctx
@@ -16,9 +18,10 @@ final class AMBBanner: AMBAdBase, BannerViewDelegate, AdSizeDelegate {
         super.init(ctx)
     }
 
-    override func isLoaded() -> Bool { bannerView != nil }
+    override func isLoaded() -> Bool { loadState == .loaded }
 
     override func load(_ ctx: AMBContext) {
+        guard loadState == .idle else { ctx.resolve(); return }
         if bannerView == nil {
             let banner = makeBanner(options.optAdSize())
             banner.delegate = self
@@ -30,15 +33,14 @@ final class AMBBanner: AMBAdBase, BannerViewDelegate, AdSizeDelegate {
             }
             bannerView = banner
         }
+        loadState = .loading
         bannerView?.load(adRequest)
         ctx.resolve()
     }
 
     override func show(_ ctx: AMBContext) {
-        guard let bannerView, let controller = plugin?.viewController else { ctx.resolve(false); return }
+        guard bannerView != nil, isActive else { ctx.resolve(false); return }
         visible = true
-        bannerView.isHidden = false
-        controller.view.addSubview(bannerView)
         plugin?.banners.show(self)
         ctx.resolve(true)
     }
@@ -55,6 +57,7 @@ final class AMBBanner: AMBAdBase, BannerViewDelegate, AdSizeDelegate {
         bannerView?.paidEventHandler = nil
         bannerView?.rootViewController = nil
         bannerView = nil
+        loadState = .idle
         super.destroy()
     }
 
@@ -68,7 +71,8 @@ final class AMBBanner: AMBAdBase, BannerViewDelegate, AdSizeDelegate {
     }
 
     func bannerViewDidReceiveAd(_ bannerView: BannerView) {
-        guard self.bannerView === bannerView else { return }
+        guard isActive, self.bannerView === bannerView, loadState != .idle else { return }
+        loadState = .loaded
         emit(AMBEvents.adLoad, sizeData(bannerView.adSize))
         emit(AMBEvents.bannerLoad)
         emit(AMBEvents.bannerSize, bannerView.adSize)
@@ -76,6 +80,9 @@ final class AMBBanner: AMBAdBase, BannerViewDelegate, AdSizeDelegate {
     }
 
     func bannerView(_ bannerView: BannerView, didFailToReceiveAdWithError error: Error) {
+        guard isActive, self.bannerView === bannerView else { return }
+        loadState = .idle
+        removeView()
         emit(AMBEvents.adLoadFail, error)
     }
 
