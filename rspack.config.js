@@ -1,12 +1,14 @@
 const path = require('path');
 const { rspack } = require('@rspack/core');
-const { getAppConfig, getWebBundlePath } = require('./dev/config');
+const { getAppConfig, getWebBundlePath, getAdConfig } = require('./dev/config');
 const StripSourceMapCommentsPlugin = require('./dev/stripSourceMapComments');
 
 module.exports = (env, options) => {
   const { mode = 'development' } = options;
   const prod = mode === 'production';
-  const { variant } = getAppConfig();
+  const platform = process.env.ACODE_PLATFORM || 'android';
+  const { variant } = getAppConfig(platform);
+  const ads = getAdConfig(platform, prod ? 'Release' : 'Debug');
   const isDev = process.env.DEV_MODE === 'true';
   const devHost = process.env.DEV_HOST || '';
   const devPort = process.env.DEV_PORT || '';
@@ -203,8 +205,16 @@ module.exports = (env, options) => {
       )] : []),
       new rspack.DefinePlugin({
         __FREE__: JSON.stringify(variant === 'free'),
-        __IOS_AD_UNITS__: JSON.stringify(process.env.ACODE_PLATFORM === 'ios' && variant === 'free'
-          ? require('./dev/scripts/iosAds').adUnits(prod ? 'Release' : 'Debug') : null),
+        IS_IOS: JSON.stringify(platform === 'ios'),
+        IS_ANDROID: JSON.stringify(platform === 'android'),
+        PLATFORM: JSON.stringify(platform),
+        ADMOB_APP_ID: JSON.stringify(ads.appId),
+        ADMOB_BANNER_ID: JSON.stringify(ads.banner),
+        ADMOB_INTERSTITIAL_ID: JSON.stringify(ads.interstitial),
+        ADMOB_REWARDED_ID: JSON.stringify(ads.rewarded),
+        ADMOB_ACADEMY_REWARDED_ID: JSON.stringify(ads.academyRewarded),
+        ADMOB_ACADEMY_INTERSTITIAL_ID: JSON.stringify(ads.academyInterstitial),
+        ADMOB_APP_OPEN_ID: JSON.stringify(ads.appOpen),
         __FDROID__: JSON.stringify(process.env.ACODE_FDROID === 'true'),
         __DEV_MODE__: JSON.stringify(isDev),
         __DEV_HOST__: JSON.stringify(devHost),

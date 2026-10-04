@@ -6,6 +6,7 @@ plugins {
 }
 
 val acode = file("../../../package.json").parseJsonObject()
+val ads = file("../../../ads.json").parseJsonObject().jsonObject("android")!!
 val selectedEdition = mapOf(
     "com.foxdebug.acode" to "paid",
     "com.foxdebug.acodefree" to "free"
@@ -68,8 +69,10 @@ android {
     buildTypes {
         getByName("debug") {
             isDebuggable = true
+            manifestPlaceholders["admobAppId"] = ads.jsonObject("test")!!["appId"] as String
         }
         getByName("release") {
+            manifestPlaceholders["admobAppId"] = ads.jsonObject("production")!!["appId"] as String
             isMinifyEnabled = true
             isShrinkResources = true
             if (signingConfigs.getByName("release").storeFile != null) {

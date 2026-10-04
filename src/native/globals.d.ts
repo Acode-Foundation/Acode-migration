@@ -6,6 +6,16 @@ declare global {
 	const Bridge: NativeBridge;
 	const __FREE__: boolean;
 	const __FDROID__: boolean;
+	const IS_IOS: boolean;
+	const IS_ANDROID: boolean;
+	const PLATFORM: "ios" | "android";
+	const ADMOB_APP_ID: string;
+	const ADMOB_BANNER_ID: string;
+	const ADMOB_INTERSTITIAL_ID: string;
+	const ADMOB_REWARDED_ID: string;
+	const ADMOB_ACADEMY_REWARDED_ID: string;
+	const ADMOB_ACADEMY_INTERSTITIAL_ID: string;
+	const ADMOB_APP_OPEN_ID: string;
 	interface Window {
 		toast: typeof import("../components/toast").default;
 		Bridge: NativeBridge;

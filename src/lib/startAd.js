@@ -7,20 +7,12 @@ import {
 	bannerVisibilityController,
 } from "./bannerVisibilityController.mjs";
 import config from "./config";
-import platform from "./platform";
 
 export { BANNER_SUPPRESSION_REASON };
 
-export let adUnitIdBanner = "ca-app-pub-5911839694379275/9157899592"; // Production
-export let adUnitIdInterstitial = "ca-app-pub-5911839694379275/9570937608"; // Production
-export let adUnitIdRewarded = "ca-app-pub-5911839694379275/1633667633"; // Production
-if (platform.isIOS) {
-	({
-		banner: adUnitIdBanner,
-		interstitial: adUnitIdInterstitial,
-		rewarded: adUnitIdRewarded,
-	} = (typeof __IOS_AD_UNITS__ !== "undefined" && __IOS_AD_UNITS__) || {});
-}
+export const adUnitIdBanner = ADMOB_BANNER_ID;
+export const adUnitIdInterstitial = ADMOB_INTERSTITIAL_ID;
+export const adUnitIdRewarded = ADMOB_REWARDED_ID;
 export let initialized = false;
 
 /** @type {import("native/admob").BannerAd} */
@@ -34,7 +26,7 @@ export default async function startAd() {
 		if (
 			!config.HAS_PRO &&
 			typeof admob !== "undefined" &&
-			!platform.isIOS &&
+			IS_ANDROID &&
 			window.ANDROID_SDK_INT < 29
 		) {
 			console.warn("AdMob not supported on this Android version, skipping ads");
@@ -82,7 +74,7 @@ function canUseAdmob() {
 	return (
 		!config.HAS_PRO &&
 		typeof admob !== "undefined" &&
-		(platform.isIOS || window.ANDROID_SDK_INT >= 29)
+		(IS_IOS || window.ANDROID_SDK_INT >= 29)
 	);
 }
 
@@ -98,22 +90,6 @@ function getConsentCoordinator() {
 
 async function initializeAds() {
 	if (initialized) return;
-	if (
-		platform.isIOS &&
-		(!adUnitIdBanner || !adUnitIdInterstitial || !adUnitIdRewarded)
-	) {
-		throw new Error(
-			"Rebuild the iOS web bundle to configure its advertising IDs.",
-		);
-	}
-
-	if (!platform.isIOS && BuildInfo.buildType === "debug") {
-		console.info("!!! Using test ads");
-		adUnitIdBanner = "ca-app-pub-3940256099942544/6300978111";
-		adUnitIdInterstitial = "ca-app-pub-3940256099942544/1033173712";
-		adUnitIdRewarded = "ca-app-pub-3940256099942544/5224354917";
-	}
-
 	await admob.start();
 
 	const currentHour = new Date().getHours();
