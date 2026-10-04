@@ -14,7 +14,7 @@ final class WebViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .black
+        view.backgroundColor = UIColor(named: "SplashBackground")
 
         let config = WKWebViewConfiguration()
         config.setURLSchemeHandler(AppURLSchemeHandler(), forURLScheme: "acode")
@@ -34,7 +34,7 @@ final class WebViewController: UIViewController {
         webView.scrollView.bounces = false
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.scrollView.isScrollEnabled = false
-        webView.backgroundColor = .black
+        webView.backgroundColor = view.backgroundColor
         webView.isOpaque = false
 
         // WebKit reparents the WebView for fullscreen, removing its constraints.

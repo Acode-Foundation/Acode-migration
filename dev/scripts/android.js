@@ -98,7 +98,14 @@ function launch(options, artifact) {
 		: "adb";
 	const id = options.targetId;
 	run(adb, [...args, "install", "-r", artifact]);
-	run(adb, [...args, "shell", "am", "start", "-n", `${id}/${id}.MainActivity`]);
+	run(adb, [
+		...args,
+		"shell",
+		"am",
+		"start",
+		"-n",
+		`${id}/com.foxdebug.acode.MainActivity`,
+	]);
 }
 
 function gradle() {

@@ -2,7 +2,8 @@ import { createRequire } from "node:module";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 const require = createRequire(import.meta.url);
-const { adUnits } = require("../../dev/scripts/iosAds.js");
+const { getAdConfig } = require("../../dev/config.js");
+const ads = require("../../ads.json");
 const banner = { on: vi.fn() };
 const interstitial = { load: vi.fn().mockResolvedValue(), on: vi.fn() };
 
@@ -17,15 +18,13 @@ beforeEach(() => {
 	vi.stubGlobal("window", { ANDROID_SDK_INT: 0 });
 	vi.stubGlobal("Bridge", { platformId: "ios" });
 	vi.stubGlobal("BuildInfo", { buildType: "debug" });
-	vi.stubGlobal("__IOS_AD_UNITS__", adUnits("Debug"));
+	setBuildConstants("ios", "Debug");
 	vi.stubGlobal("admob", {
 		privacy: {
-			gatherConsent: vi
-				.fn()
-				.mockResolvedValue({
-					consentStatus: "notRequired",
-					canRequestAds: true,
-				}),
+			gatherConsent: vi.fn().mockResolvedValue({
+				consentStatus: "notRequired",
+				canRequestAds: true,
+			}),
 		},
 		start: vi.fn().mockResolvedValue(),
 		configure: vi.fn().mockResolvedValue(),
@@ -43,7 +42,15 @@ afterEach(() => {
 	vi.clearAllMocks();
 });
 
-test("iOS initializes after consent using iOS IDs without the Android SDK gate", async () => {
+test.each([
+	["ios", "Debug"],
+	["ios", "Release"],
+	["android", "Debug"],
+	["android", "Release"],
+])("%s %s initializes after consent using its compiled IDs", async (platform, mode) => {
+	setBuildConstants(platform, mode);
+	window.ANDROID_SDK_INT = platform === "android" ? 29 : 0;
+	const ids = getAdConfig(platform, mode);
 	const { default: startAd, adUnitIdRewarded } = await import(
 		"../../src/lib/startAd.js"
 	);
@@ -51,13 +58,13 @@ test("iOS initializes after consent using iOS IDs without the Android SDK gate",
 	expect(admob.privacy.gatherConsent).toHaveBeenCalledOnce();
 	expect(admob.start).toHaveBeenCalledOnce();
 	expect(admob.BannerAd).toHaveBeenCalledWith({
-		adUnitId: adUnits("Debug").banner,
+		adUnitId: ids.banner,
 		position: "bottom",
 	});
 	expect(admob.InterstitialAd).toHaveBeenCalledWith({
-		adUnitId: adUnits("Debug").interstitial,
+		adUnitId: ids.interstitial,
 	});
-	expect(adUnitIdRewarded).toBe(adUnits("Debug").rewarded);
+	expect(adUnitIdRewarded).toBe(ids.rewarded);
 	expect(window.adRewardedUnitId).toBe(adUnitIdRewarded);
 });
 
@@ -73,7 +80,7 @@ test("iOS does not initialize ads when consent is unavailable", async () => {
 });
 
 test("Android retains its existing test units and SDK version gate", async () => {
-	Bridge.platformId = "android";
+	setBuildConstants("android", "Debug");
 	window.ANDROID_SDK_INT = 28;
 	const { default: startAd } = await import("../../src/lib/startAd.js");
 	await startAd();
@@ -89,37 +96,39 @@ test("Android retains its existing test units and SDK version gate", async () =>
 	);
 });
 
-test("free release builds require dedicated production IDs and reject demo IDs", () => {
-	for (const format of ["BANNER", "INTERSTITIAL", "REWARDED"])
-		vi.stubEnv(`ACODE_IOS_ADMOB_${format}_ID`, "");
-	expect(() => adUnits("Release")).toThrow(/ACODE_IOS_ADMOB_BANNER_ID/);
-	vi.stubEnv("ACODE_IOS_ADMOB_BANNER_ID", adUnits("Debug").banner);
-	expect(() => adUnits("Release")).toThrow(/ACODE_IOS_ADMOB_BANNER_ID/);
-	for (const format of ["BANNER", "INTERSTITIAL", "REWARDED"]) {
-		vi.stubEnv(
-			`ACODE_IOS_ADMOB_${format}_ID`,
-			"ca-app-pub-1111111111111111/1111111111",
-		);
-	}
-	expect(Object.values(adUnits("Release"))).toEqual(
-		Array(3).fill("ca-app-pub-1111111111111111/1111111111"),
-	);
-});
-
-test("a stale web bundle does not crash iOS startup or request Android ads", async () => {
-	vi.stubGlobal("__IOS_AD_UNITS__", null);
-	const error = vi.spyOn(console, "error").mockImplementation(() => {});
+test.each([
+	"",
+	"invalid",
+	"ca-app-pub-3940256099942544/2435281174",
+])("release builds reject an invalid production ID: %s", (id) => {
+	const original = ads.ios.production.banner;
+	ads.ios.production.banner = id;
 	try {
-		const { default: startAd } = await import("../../src/lib/startAd.js");
-		await startAd();
-		expect(admob.start).not.toHaveBeenCalled();
-		expect(error).toHaveBeenCalledWith(
-			"Failed to initialize ads:",
-			expect.objectContaining({
-				message: expect.stringContaining("Rebuild the iOS"),
-			}),
+		expect(() => getAdConfig("ios", "Release")).toThrow(
+			/Invalid ios banner ID/,
 		);
 	} finally {
-		error.mockRestore();
+		ads.ios.production.banner = original;
 	}
 });
+
+test("runtime build metadata cannot replace compiled iOS production IDs", async () => {
+	setBuildConstants("ios", "Release");
+	Bridge.platformId = "android";
+	const { default: startAd } = await import("../../src/lib/startAd.js");
+	await startAd();
+	expect(admob.BannerAd).toHaveBeenCalledWith({
+		adUnitId: ads.ios.production.banner,
+		position: "bottom",
+	});
+});
+
+function setBuildConstants(platform, mode) {
+	const ids = getAdConfig(platform, mode);
+	vi.stubGlobal("IS_IOS", platform === "ios");
+	vi.stubGlobal("IS_ANDROID", platform === "android");
+	vi.stubGlobal("PLATFORM", platform);
+	vi.stubGlobal("ADMOB_BANNER_ID", ids.banner);
+	vi.stubGlobal("ADMOB_INTERSTITIAL_ID", ids.interstitial);
+	vi.stubGlobal("ADMOB_REWARDED_ID", ids.rewarded);
+}

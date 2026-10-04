@@ -656,6 +656,20 @@ async function loadApp() {
 			style={{ fontSize: "1.2em" }}
 		/>
 	);
+	const $terminalInfo = platform.isIOS ? (
+		<button
+			className="icon info_outline"
+			attr-data-action="terminal-info"
+			attr-aria-label="About the iOS terminal"
+			style={{ fontSize: "1.2em" }}
+			onclick={() =>
+				alert(
+					"iOS terminal",
+					"The iOS terminal runs Linux commands through emulation. Commands and tools can be slower than on Android or a desktop, especially when starting or doing intensive work.",
+				)
+			}
+		/>
+	) : null;
 	const $navToggler = (
 		<span className="icon menu" attr-action="toggle-sidebar" />
 	);
@@ -849,6 +863,13 @@ async function loadApp() {
 
 	function onEditorUpdate(mode, saveState = true) {
 		const { activeFile } = editorManager;
+		if ($terminalInfo) {
+			if (activeFile?.type === "terminal") {
+				$header.insertBefore($terminalInfo, $header.lastChild);
+			} else {
+				$terminalInfo.remove();
+			}
+		}
 
 		// if (!$editMenuToggler.isConnected) {
 		// 	$header.insertBefore($editMenuToggler, $header.lastChild);
