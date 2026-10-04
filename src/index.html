@@ -63,6 +63,26 @@
       text-align: left;
     }
 
+    .splash-beta {
+      display: none;
+      position: absolute;
+      top: calc(50% + 110px);
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 4px 12px;
+      border: 1px solid currentColor;
+      border-radius: 16px;
+      color: var(--primary-text-color, rgb(209, 209, 209));
+      background-color: var(--secondary-color, #20202c);
+      font: 600 11px/1.4 sans-serif;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    html[data-platform="ios"] .splash-beta {
+      display: inline-block;
+    }
+
     .splash-message {
       position: absolute;
       bottom: 15px;
@@ -85,6 +105,21 @@
       document.documentElement.style.setProperty("--bg-color", bg);
       document.documentElement.style.backgroundColor = bg;
       document.body && (document.body.style.backgroundColor = bg);
+
+      var ios = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.exec;
+      if (ios) {
+        document.documentElement.setAttribute("data-platform", "ios");
+        var background = getComputedStyle(document.documentElement).backgroundColor;
+        var components = background.match(/[\d.]+/g);
+        if (background.indexOf("rgb") === 0 && components) {
+          ios.postMessage({
+            service: "SystemBarPlugin",
+            action: "setStatusBarBackgroundColor",
+            args: JSON.stringify(components.map(Number)),
+            id: 0
+          });
+        }
+      }
 
       function getWebViewMajor() {
         var match = navigator.userAgent.match(/(?:Chrome|CriOS)\/(\d+)/);
@@ -191,6 +226,7 @@
 
 <body class="loading" data-version="" data-small-msg="">
   <div id="splash">
+    <span class="splash-beta">Beta</span>
     <div class="splash-version"></div>
     <div class="splash-message"></div>
   </div>

@@ -26,11 +26,27 @@
 
     .welcome-header-text {
       h1 {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
         font-size: 20px;
         font-weight: 600;
         color: var(--primary-text-color);
         margin: 0 0 4px 0;
         letter-spacing: -0.3px;
+      }
+
+      .beta-badge {
+        padding: 2px 7px;
+        border: 1px solid var(--active-color);
+        border-radius: 12px;
+        color: var(--active-color);
+        font-size: 10px;
+        font-weight: 600;
+        line-height: 1.4;
+        letter-spacing: 0.6px;
+        text-transform: uppercase;
       }
 
       .tagline {
@@ -187,6 +203,7 @@
 
       .welcome-header-text h1 {
         font-size: 18px;
+        justify-content: center;
       }
     }
 
