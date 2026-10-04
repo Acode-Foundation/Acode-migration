@@ -19,7 +19,12 @@ test.each([
 	)[0];
 	if (ios)
 		window.webkit = { messageHandlers: { exec: { postMessage: vi.fn() } } };
-	vm.runInNewContext(html.match(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/i)[1], {
+	const scriptWindow = new Window();
+	scriptWindow.document.documentElement.innerHTML = html;
+	const scriptSource =
+		scriptWindow.document.querySelector("script")?.textContent ?? "";
+	scriptWindow.happyDOM.abort();
+	vm.runInNewContext(scriptSource, {
 		window,
 		document: window.document,
 		localStorage: window.localStorage,
