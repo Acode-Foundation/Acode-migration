@@ -36,7 +36,6 @@ import {
 	runScopeHandlers,
 } from "@codemirror/view";
 import { focusEditorIfEditable } from "cm/editorReadOnly";
-import platform from "lib/platform";
 import createKeyboardEvent from "utils/keyboardEvent";
 
 interface QuickToolKeyModifiers {
@@ -151,13 +150,7 @@ export function runQuickToolKey(
 	if (!view?.state || typeof view.focus !== "function") return false;
 
 	const event = createQuickToolKeyEvent(keyCode, modifiers);
-	// iOS's Ctrl+arrows navigate syntax; the Quick Tools Ctrl button moves by word.
-	const wordMovement =
-		platform.isIOS &&
-		modifiers.ctrlKey &&
-		!modifiers.metaKey &&
-		(keyCode === 37 || keyCode === 39);
-	if (!wordMovement && runScopeHandlers(view, event, "editor")) {
+	if (runScopeHandlers(view, event, "editor")) {
 		focusEditorIfEditable(view);
 		return true;
 	}

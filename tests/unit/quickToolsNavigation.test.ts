@@ -1,8 +1,7 @@
 // @vitest-environment happy-dom
 
-import { defaultKeymap } from "@codemirror/commands";
 import { EditorState } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
+import { EditorView, type KeyBinding, keymap } from "@codemirror/view";
 import { afterEach, expect, test, vi } from "vitest";
 import {
 	createQuickToolKeyEvent,
@@ -59,11 +58,39 @@ test("an explicitly bound function key still runs its own command", () => {
 	expect(run).toHaveBeenCalledOnce();
 });
 
-function createView(bindings = []) {
+test.each([
+	["Ctrl", {}],
+	["Ctrl-Shift", { shiftKey: true }],
+	["Ctrl-Alt", { altKey: true }],
+] as const)("%s+arrows honor registered commands on iOS", (prefix, modifiers) => {
+	for (const [keyCode, key] of [
+		[37, "ArrowLeft"],
+		[39, "ArrowRight"],
+	] as const) {
+		const run = vi.fn(() => true);
+		const view = createView([{ key: `${prefix}-${key}`, run }]);
+		expect(
+			runQuickToolKey(view, keyCode, { ctrlKey: true, ...modifiers }),
+		).toBe(true);
+		expect(run).toHaveBeenCalledOnce();
+		expect(view.state.selection.main.head).toBe(0);
+		expect(view.state.selection.main.anchor).toBe(0);
+	}
+});
+
+test("a declined Ctrl+Right command falls back to word movement", () => {
+	const run = vi.fn(() => false);
+	const view = createView([{ key: "Ctrl-ArrowRight", run }]);
+	expect(runQuickToolKey(view, 39, { ctrlKey: true })).toBe(true);
+	expect(run).toHaveBeenCalledOnce();
+	expect(view.state.selection.main.head).toBe(3);
+});
+
+function createView(bindings: KeyBinding[] = []) {
 	const view = new EditorView({
 		state: EditorState.create({
 			doc: "one two",
-			extensions: [keymap.of([...bindings, ...defaultKeymap])],
+			extensions: [keymap.of(bindings)],
 		}),
 		parent: document.body,
 	});
