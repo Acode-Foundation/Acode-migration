@@ -15,9 +15,18 @@ FAILSAFE=false
 # Bump when a generated artifact below changes so existing installs refresh it.
 # Presence checks alone pin a stale script on disk forever, which would keep a
 # fixed bug alive for every user who installed before the fix shipped.
-ACODE_GENERATED_VERSION="3"
+ACODE_GENERATED_VERSION="4"
 ACODE_VERSION_FILE="/etc/acode/generated.version"
+ACODE_GROUP_FILE="/etc/group"
 ACODE_GROUP_LOCK="/etc/.acode-group.lock"
+# Minutes an abandoned group lock may sit before it is treated as debris.
+ACODE_GROUP_LOCK_GRACE="5"
+# Node.js release the rootfs installs from NodeSource. Ubuntu 24.04 ships
+# nodejs 18, which is past end of life.
+ACODE_NODE_MAJOR="26.x"
+ACODE_APT_SOURCES="/etc/apt/sources.list.d/nodesource.sources"
+ACODE_APT_KEYRING="/usr/share/keyrings/nodesource.gpg"
+ACODE_APT_PREFERENCES="/etc/apt/preferences.d"
 
 # ============================================================
 # Parse arguments
@@ -84,23 +93,32 @@ _add_android_group() {
     # Every terminal tab appends concurrently, so the lookup and the append have
     # to be one atomic step or duplicate lines accumulate. mkdir is the atomic
     # primitive here because flock is not guaranteed to exist in the rootfs.
-    # Losing the race means another shell is already performing the pass: skip
-    # rather than steal the directory, which would let a second writer in.
     if ! mkdir "$ACODE_GROUP_LOCK" 2>/dev/null; then
-        return 0
+        # A shell killed with SIGKILL cannot run its EXIT trap, which would park
+        # this directory forever and skip group registration on every later
+        # launch. The pass takes milliseconds, so anything older than the grace
+        # period is debris: clear it and retry once.
+        if [ -n "$(find "$ACODE_GROUP_LOCK" -maxdepth 0 -mmin +"$ACODE_GROUP_LOCK_GRACE" 2>/dev/null)" ]; then
+            rmdir "$ACODE_GROUP_LOCK" 2>/dev/null
+        fi
+
+        # Losing the race means another shell is already performing the pass:
+        # skip rather than steal the directory, which would let a second writer
+        # in while it appends.
+        mkdir "$ACODE_GROUP_LOCK" 2>/dev/null || return 0
     fi
     trap 'rmdir "$ACODE_GROUP_LOCK" 2>/dev/null' EXIT
 
     if ! awk -F: -v n="$name" -v g="$gid" '
         $1 == n || $3 == g { found = 1 }
         END { exit !found }
-    ' /etc/group; then
+    ' "$ACODE_GROUP_FILE"; then
         # Keep the file newline-terminated before appending.
-        if [ -s /etc/group ] && [ -n "$(tail -c 1 /etc/group)" ]; then
-            printf '\n' >> /etc/group
+        if [ -s "$ACODE_GROUP_FILE" ] && [ -n "$(tail -c 1 "$ACODE_GROUP_FILE")" ]; then
+            printf '\n' >> "$ACODE_GROUP_FILE"
         fi
 
-        printf '%s:x:%s:\n' "$name" "$gid" >> /etc/group
+        printf '%s:x:%s:\n' "$name" "$gid" >> "$ACODE_GROUP_FILE"
     fi
 
     rmdir "$ACODE_GROUP_LOCK" 2>/dev/null
@@ -110,7 +128,7 @@ _add_android_group() {
 register_android_groups() {
     local android_gid
 
-    [ -w /etc/group ] || return 0
+    [ -w "$ACODE_GROUP_FILE" ] || return 0
 
     # The kernel still reports the real credentials even though proot -0 fakes
     # getuid()/getgid() for the shell, so `Gid:` names the app's primary GID
@@ -278,6 +296,79 @@ run_node_jemalloc_hook() {
 }
 
 # ============================================================
+# NodeSource package repository
+#
+# Ubuntu 24.04 ships nodejs 18, which is past end of life, so anything the
+# npm-based LSP installs need gets an unsupported runtime. This registers the
+# NodeSource repository the way deb.nodesource.com/setup_26.x does, but inline:
+# the published script is not used because it runs `apt update`, installs
+# pre-requisites and rewrites the key on every run, while this only has to
+# happen once per generated version and has to stay best effort. The apt pin
+# keeps `apt install nodejs` on NodeSource.
+# ============================================================
+
+configure_nodesource_repo() {
+    local arch=""
+
+    # Architecture packages are fetched for; NodeSource only builds these two.
+    arch="$(dpkg --print-architecture 2>/dev/null)"
+    case "$arch" in
+        amd64|arm64) ;;
+        *)
+            log_warn "NodeSource has no packages for '${arch:-unknown}' - keeping Ubuntu's nodejs"
+            return 0
+            ;;
+    esac
+
+    if needs_refresh "$ACODE_APT_SOURCES"; then
+        log_step "Installing the NodeSource signing key..."
+
+        # The key and the lists have to be registered before the update below,
+        # and curl/gnupg are what the rootfs may still be missing.
+        if ! apt-get install -y --no-install-recommends ca-certificates curl gnupg; then
+            log_warn "Could not install curl/gnupg - keeping Ubuntu's nodejs"
+            return 0
+        fi
+
+        mkdir -p \
+            "$(dirname "$ACODE_APT_SOURCES")" \
+            "$(dirname "$ACODE_APT_KEYRING")" \
+            "$ACODE_APT_PREFERENCES"
+
+        if ! curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key |
+            gpg --dearmor -o "$ACODE_APT_KEYRING"; then
+            log_warn "Could not import the NodeSource signing key - keeping Ubuntu's nodejs"
+            return 0
+        fi
+
+        chmod 644 "$ACODE_APT_KEYRING"
+
+        cat > "$ACODE_APT_SOURCES" <<EOF
+# acode-generated-version: $ACODE_GENERATED_VERSION
+Types: deb
+URIs: https://deb.nodesource.com/node_$ACODE_NODE_MAJOR
+Suites: nodistro
+Components: main
+Architectures: $arch
+Signed-By: $ACODE_APT_KEYRING
+EOF
+
+        # The pin decides which suite wins when a package exists in both.
+        cat > "$ACODE_APT_PREFERENCES/nodejs" <<'EOF'
+Package: nodejs
+Pin: origin deb.nodesource.com
+Pin-Priority: 600
+EOF
+    fi
+
+    if apt-get update; then
+        log_ok "NodeSource repository configured"
+    else
+        log_warn "Could not read the NodeSource package lists - keeping Ubuntu's nodejs"
+    fi
+}
+
+# ============================================================
 # Install log colors
 #
 # The install log is rendered by the app's xterm, which understands ANSI SGR
@@ -348,9 +439,15 @@ if [ "$INSTALLING" = true ]; then
     install_node_jemalloc_hook
     log_ok "Node.js jemalloc hook installed"
 
+    # Registered before the package lists are fetched below, so that one update
+    # covers NodeSource too.
+    log_step "Configuring the Node.js package repository..."
+    configure_nodesource_repo
+    log_ok "Node.js package repository ready"
+
     # tzdata lets /etc/localtime resolve and libjemalloc2 backs the Node.js
     # wrapper. Best effort and time-bounded so an offline install still works.
-    # This is the only network access during setup, so it stays visible.
+    # Setup reaches the network here, for the package lists and NodeSource.
 
     APT_PACKAGES=""
     [ -d /usr/share/zoneinfo ] || APT_PACKAGES="tzdata"
@@ -396,13 +493,73 @@ if [ "$INSTALLING" = true ]; then
     if [ ! -f "$HOME/.bashrc" ]; then
         touch "$HOME/.bashrc" && chmod 644 "$HOME/.bashrc"
     fi
-    mkdir -p "$PREFIX/ubuntu/usr/local/bin"
+
+    # --------------------------------------------------------
+    # Generated artifacts
+    # --------------------------------------------------------
+
+    log_step "Writing shell configuration..."
+
+    refresh_generated_artifacts
+
+    log_ok "Shell configuration ready"
+
+    # --------------------------------------------------------
+    # Register the Android GIDs so `groups`/`id` can name them
+    # --------------------------------------------------------
+
+    log_step "Registering Android groups..."
+    register_android_groups
+    log_ok "Android groups registered"
+
+    # --------------------------------------------------------
+    # Mark rootfs as configured
+    # --------------------------------------------------------
+
+    mkdir -p "$PREFIX/.configured"
+
+    touch "$PREFIX/.configured/rootfs"
+
+    # The install path reports success purely from this exit code, so verify the
+    # artifacts actually landed instead of announcing completion unconditionally.
+    missing=""
+    for required in \
+        "$PREFIX/ubuntu/bin/sh" \
+        "$PREFIX/ubuntu/bin/bash" \
+        "$PREFIX/ubuntu/etc/group" \
+        "$PREFIX/ubuntu/initrc" \
+        "$PREFIX/ubuntu/usr/local/bin/acode" \
+        "$PREFIX/.configured/rootfs"; do
+        [ -e "$required" ] || missing="$missing $required"
+    done
+
+    if [ -n "$missing" ]; then
+        log_error "Rootfs configuration incomplete, missing:$missing"
+        exit 1
+    fi
+
+    write_version_marker
+
+    log_ok "Rootfs configuration complete."
+    exit 0
+fi
+
+# ============================================================
+# Generated artifacts
+#
+# initrc, the acode CLI and the MOTD live in the rootfs rather than in this
+# launcher, so they can be rewritten without reinstalling the sandbox. The
+# call sites are the install path only: a normal launch must not touch them.
+# Each write is guarded by needs_refresh, so a current install only performs
+# the version check.
+# ============================================================
+
+refresh_generated_artifacts() {
+    mkdir -p "$PREFIX/ubuntu/etc" "$PREFIX/ubuntu/usr/local/bin"
 
     # --------------------------------------------------------
     # Acode MOTD
     # --------------------------------------------------------
-
-    log_step "Writing message of the day..."
 
     if needs_refresh "$PREFIX/ubuntu/etc/acode_motd"; then
         cat > "$PREFIX/ubuntu/etc/acode_motd" <<'EOF'
@@ -417,13 +574,9 @@ Working with packages:
 EOF
     fi
 
-    log_ok "Message of the day ready"
-
     # --------------------------------------------------------
     # Acode CLI
     # --------------------------------------------------------
-
-    log_step "Installing the acode CLI..."
 
     if needs_refresh "$PREFIX/ubuntu/usr/local/bin/acode"; then
         cat > "$PREFIX/ubuntu/usr/local/bin/acode" <<'ACODE_CLI'
@@ -709,6 +862,18 @@ command_not_found_handle() {
 alias clear='reset'
 
 # ============================================================
+# Prompt
+#
+# Ubuntu's /etc/bash.bashrc installs a plain prompt on every interactive
+# shell, and the rc files below load after this point, so the colored prompt
+# is written here and repaired again if the user has no prompt of their own.
+# ============================================================
+
+PROMPT_COMMAND='_PS1_PATH=$(_shorten_path); _PS1_EXIT=$?; if [ "$_PS1_EXIT" -ne 0 ]; then _PS1_MARK="\[\033[31m\]>$\[\033[0m\]"; else _PS1_MARK="$"; fi'
+
+PS1='\[\033[1;32m\]\u\[\033[0m\]@localhost \[\033[1;34m\]$_PS1_PATH\[\033[0m\] ${_PS1_MARK:-$} '
+
+# ============================================================
 # User configuration
 # ============================================================
 
@@ -716,67 +881,27 @@ if [ -f /etc/bash.bashrc ]; then
     source /etc/bash.bashrc
 fi
 
+# Snapshot what the rootfs left in PS1 before the user's rc file runs, so a
+# prompt that survives it unchanged can be told apart from a deliberate one.
+_ACODE_ROOTFS_PS1="$PS1"
+
 if [ -f "$HOME/.bashrc" ]; then
     source "$HOME/.bashrc"
 fi
 
-# ============================================================
-# Prompt
-#
-# Defined after the distro and user rc files above: Ubuntu's
-# /etc/bash.bashrc installs a non-color PS1, which otherwise
-# overwrites this prompt and leaves it uncolored.
-# ============================================================
+# A user prompt always wins. The plain prompt the rootfs ships is only kept
+# when it survived the user's rc file untouched, which means it was never a
+# choice, so the colored prompt goes back.
+if [ "$PS1" = "$_ACODE_ROOTFS_PS1" ]; then
+    PS1='\[\033[1;32m\]\u\[\033[0m\]@localhost \[\033[1;34m\]$_PS1_PATH\[\033[0m\] ${_PS1_MARK:-$} '
+fi
 
-PROMPT_COMMAND='_PS1_PATH=$(_shorten_path); _PS1_EXIT=$?; if [ "$_PS1_EXIT" -ne 0 ]; then _PS1_MARK="\[\033[31m\]>$\[\033[0m\]"; else _PS1_MARK="$"; fi'
-
-PS1='\[\033[1;32m\]\u\[\033[0m\]@localhost \[\033[1;34m\]$_PS1_PATH\[\033[0m\] ${_PS1_MARK:-$} '
+unset _ACODE_ROOTFS_PS1
 EOF
     fi
 
     chmod +x "$PREFIX/ubuntu/initrc"
-
-    log_ok "Shell configuration ready"
-
-    # --------------------------------------------------------
-    # Register the Android GIDs so `groups`/`id` can name them
-    # --------------------------------------------------------
-
-    log_step "Registering Android groups..."
-    register_android_groups
-    log_ok "Android groups registered"
-
-    # --------------------------------------------------------
-    # Mark rootfs as configured
-    # --------------------------------------------------------
-
-    mkdir -p "$PREFIX/.configured"
-
-    touch "$PREFIX/.configured/rootfs"
-
-    # The install path reports success purely from this exit code, so verify the
-    # artifacts actually landed instead of announcing completion unconditionally.
-    missing=""
-    for required in \
-        "$PREFIX/ubuntu/bin/sh" \
-        "$PREFIX/ubuntu/bin/bash" \
-        "$PREFIX/ubuntu/etc/group" \
-        "$PREFIX/ubuntu/initrc" \
-        "$PREFIX/ubuntu/usr/local/bin/acode" \
-        "$PREFIX/.configured/rootfs"; do
-        [ -e "$required" ] || missing="$missing $required"
-    done
-
-    if [ -n "$missing" ]; then
-        log_error "Rootfs configuration incomplete, missing:$missing"
-        exit 1
-    fi
-
-    write_version_marker
-
-    log_ok "Rootfs configuration complete."
-    exit 0
-fi
+}
 
 # ============================================================
 
