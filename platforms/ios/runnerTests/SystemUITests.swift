@@ -62,7 +62,7 @@ final class SystemUITests: BridgeTestCase {
     func testFullscreenOrientationRequiresSessionAndRestoresPolicyOnExit() async throws {
         let webView = try await editorWebView()
         let scene = try XCTUnwrap(webView.window?.windowScene)
-        XCTAssertTrue(webView.configuration.preferences.isElementFullscreenEnabled)
+        XCTAssertFalse(webView.configuration.preferences.isElementFullscreenEnabled)
         var responder: UIResponder? = webView
         while responder != nil, !(responder is WebViewController) { responder = responder?.next }
         let controller = try XCTUnwrap(responder as? WebViewController)
@@ -77,16 +77,20 @@ final class SystemUITests: BridgeTestCase {
                 await target.requestFullscreen();return !!document.fullscreenElement;
                 """, arguments: [:], in: nil, contentWorld: .page)
             for _ in 0..<100 {
-                if webView.fullscreenState == .inFullscreen { break }
+                if controller.fullscreen.isFullscreen { break }
                 try await Task.sleep(for: .milliseconds(20))
             }
-            XCTAssertEqual(webView.fullscreenState, .inFullscreen)
+            XCTAssertTrue(controller.fullscreen.isFullscreen)
+            XCTAssertEqual(webView.fullscreenState, .notInFullscreen)
+            XCTAssertTrue(controller.prefersStatusBarHidden)
+            XCTAssertTrue(controller.prefersHomeIndicatorAutoHidden)
+            XCTAssertEqual(webView.convert(webView.bounds, to: controller.view), controller.view.bounds)
             XCTAssertGreaterThan(webView.bounds.width, 300)
             XCTAssertGreaterThan(webView.bounds.height, 300)
             try await checkOrientation(webView, scene: scene, controller: controller)
             _ = try await webView.callAsyncJavaScript("await document.exitFullscreen()", arguments: [:], in: nil, contentWorld: .page)
             for _ in 0..<100 {
-                if webView.fullscreenState == .notInFullscreen { break }
+                if !controller.fullscreen.isFullscreen { break }
                 try await Task.sleep(for: .milliseconds(20))
             }
             XCTAssertNil(AppDelegate.shared?.fullscreenOrientation)
@@ -102,11 +106,11 @@ final class SystemUITests: BridgeTestCase {
             throw error
         }
         _ = try await webView.evaluateJavaScript("document.getElementById('ios-fullscreen-fixture')?.remove()")
-        let backUnsupported = try await webView.callAsyncJavaScript("""
+        let backRequiresFullscreen = try await webView.callAsyncJavaScript("""
             const call=enabled=>new Promise((resolve,reject)=>Bridge.exec(resolve,reject,'System','set-fullscreen-back-handler',[enabled]));
             await call(false);try {await call(true);return false;}catch{return true;}
             """, arguments: [:], in: nil, contentWorld: .page) as? Bool
-        XCTAssertEqual(backUnsupported, true)
+        XCTAssertEqual(backRequiresFullscreen, true)
     }
 
     func testThemeAppliesSystemBarBackgroundColor() async throws {
@@ -145,7 +149,7 @@ final class SystemUITests: BridgeTestCase {
             XCTAssertTrue(error.contains("windowing mode"), error)
             XCTAssertNil(AppDelegate.shared?.fullscreenOrientation)
             XCTAssertNil(controller.fullscreen.requestedOrientation)
-            XCTAssertEqual(webView.fullscreenState, .inFullscreen)
+            XCTAssertTrue(controller.fullscreen.isFullscreen)
             _ = try await webView.callAsyncJavaScript("await acode.require('orientation').unlock()", arguments: [:], in: nil, contentWorld: .page)
             XCTAssertNil(AppDelegate.shared?.fullscreenOrientation)
             return

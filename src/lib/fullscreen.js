@@ -1,4 +1,4 @@
-/** Opt-in Android Back delivery for the current browser fullscreen owner. */
+/** Opt-in Back delivery for the current fullscreen owner on Android and iOS. */
 let owner = fullscreenElement();
 let generation = 0;
 let registration = null;

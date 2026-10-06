@@ -480,13 +480,26 @@ click handlers with feedback enabled. Eight focused editor, file-browser and
 haptic checks pass per edition; the normal-app project check above also used the
 quick-tools Save button. Physical haptic sensation remains unverified.
 
-Main and preview WebViews enable element fullscreen. The existing `orientation`
-plugin API applies portrait/landscape requests only during foreground fullscreen,
-releases its policy on exit, reload or unlock, and temporarily restores normal
-rotation while inactive. iOS rejects Android Back-handler registration; release
-remains safe. Simulator tests verify real fullscreen entry, rotation, restoration
-and preview viewport scaling. The main WebView uses an autoresizing child inside
-a constrained wrapper because WebKit reparents it and removes its constraints.
+The main WebView implements the standard element fullscreen API using a manual
+popover and edge-to-edge native layout, preserving iframe state and touch
+coordinates without WebKit's browser fullscreen presentation. Preview WebViews
+retain WebKit fullscreen. The existing `orientation` plugin API applies
+portrait/landscape requests only during foreground fullscreen, releases its policy
+on exit, reload or unlock, and temporarily restores normal rotation while inactive.
+A completed downward swipe (at least 40 points) starting anywhere across the top
+(within 44 points below the top safe-area inset)
+reveals the native Back button in main-app fullscreen. It hides after three seconds,
+on backgrounding or on exit; tapping restarts its hide timer. A completed left-edge
+swipe (at least 60 points) delivers Back directly. `fullscreen.setBackHandler(callback | null)`
+receives these actions through `fullscreenbackbutton`; without a handler they exit
+fullscreen. A visible modal within the fullscreen owner gets the first opportunity
+to handle Escape, regardless of focus, so Back closes Astray's open pause menu and
+resumes the game even after interacting with the menu or revealing the native button.
+Registration clears on exit or reload, survives orientation unlock, and delivery
+is disabled while inactive. Games such as Astray can open their pause menu while
+remaining in landscape, then restore the editor through Exit. Simulator tests cover
+ownership, callback failure, Back controls, touch coordinates, rotation and restoration.
+Motion sensor readings require a physical device; simulated inputs are test fixtures.
 On iPadOS 18.6 and 26.5 with multitasking enabled, UIKit rejects programmatic
 orientation changes. The API rejects its promise and clears the requested policy;
 fullscreen entry/exit and normal device rotation remain available. Keep iPad

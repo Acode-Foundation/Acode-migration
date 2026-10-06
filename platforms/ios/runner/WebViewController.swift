@@ -10,6 +10,9 @@ final class WebViewController: UIViewController {
     private(set) var fullscreen: WebFullscreen!
     private var contentTop: NSLayoutConstraint!
     private var contentBottom: NSLayoutConstraint!
+    private var normalLayout: [NSLayoutConstraint] = []
+    private var fullscreenLayout: [NSLayoutConstraint] = []
+    var isFullscreenLayout: Bool { fullscreenLayout.first?.isActive == true }
     private var scrollObservation: NSKeyValueObservation?
 
     override func viewDidLoad() {
@@ -24,7 +27,6 @@ final class WebViewController: UIViewController {
         config.userContentController = contentController
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
 
-        config.preferences.isElementFullscreenEnabled = true
         config.allowsInlineMediaPlayback = true
         webView = AppWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = self
@@ -37,7 +39,6 @@ final class WebViewController: UIViewController {
         webView.backgroundColor = view.backgroundColor
         webView.isOpaque = false
 
-        // WebKit reparents the WebView for fullscreen, removing its constraints.
         let content = UIView()
         view.addSubview(content)
         content.addSubview(webView)
@@ -45,12 +46,19 @@ final class WebViewController: UIViewController {
         webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         contentTop = content.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor)
         contentBottom = content.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor)
-        NSLayoutConstraint.activate([
+        normalLayout = [
             contentTop,
             content.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
             content.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
             contentBottom,
-        ])
+        ]
+        fullscreenLayout = [
+            content.topAnchor.constraint(equalTo: view.topAnchor),
+            content.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            content.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ]
+        NSLayoutConstraint.activate(normalLayout)
 
         // The keyboard layout guide resizes the editor; WebKit scrolling would shift it twice.
         scrollObservation = webView.scrollView.observe(\.contentOffset, options: [.new]) { scrollView, _ in
@@ -78,6 +86,16 @@ final class WebViewController: UIViewController {
         contentTop.constant = top
         contentBottom.constant = -bottom
         view.layoutIfNeeded()
+    }
+
+    func setFullscreenLayout(_ active: Bool) {
+        NSLayoutConstraint.deactivate(active ? normalLayout : fullscreenLayout)
+        NSLayoutConstraint.activate(active ? fullscreenLayout : normalLayout)
+        setThemeType(themeType)
+        setNeedsUpdateOfHomeIndicatorAutoHidden()
+        setNeedsUpdateOfScreenEdgesDeferringSystemGestures()
+        view.layoutIfNeeded()
+        bridge.adsService?.banners.layout()
     }
 
     @objc func appMovedToBackground() {
@@ -123,7 +141,9 @@ final class WebViewController: UIViewController {
     }
 
     var statusBarHidden = false
-    override var prefersStatusBarHidden: Bool { statusBarHidden }
+    override var prefersStatusBarHidden: Bool { statusBarHidden || isFullscreenLayout }
+    override var prefersHomeIndicatorAutoHidden: Bool { isFullscreenLayout }
+    override var preferredScreenEdgesDeferringSystemGestures: UIRectEdge { isFullscreenLayout ? .all : [] }
 
     var systemConfiguration: [String: Any] {
         let hardwareKeyboard = GCKeyboard.coalesced != nil
@@ -137,6 +157,7 @@ final class WebViewController: UIViewController {
 
     func setThemeType(_ type: String) {
         themeType = type
+        fullscreen?.updateControls()
         setNeedsStatusBarAppearanceUpdate()
         var vc: UIViewController? = parent
         while let current = vc {

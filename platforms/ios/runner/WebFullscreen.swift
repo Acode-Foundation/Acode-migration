@@ -5,23 +5,48 @@ import WebKit
 final class WebFullscreen: NSObject {
     private weak var controller: WebViewController?
     private weak var scene: UIWindowScene?
-    private var observation: NSKeyValueObservation?
     private var task: Task<Void, Never>?
     private var pending: Callback?
     private var requestID = UUID()
     private var foreground = true
+    private var controls: FullscreenBackControls!
+    private var hasBackHandler = false
+    var isFullscreen: Bool { controller?.isFullscreenLayout == true }
     private(set) var requestedOrientation: UIInterfaceOrientationMask?
 
     init(controller: WebViewController) {
         self.controller = controller
         super.init()
-        observation = controller.webView.observe(\.fullscreenState, options: [.new]) { [weak self] webView, _ in
-            MainActor.assumeIsolated {
-                if webView.fullscreenState == .notInFullscreen || webView.fullscreenState == .exitingFullscreen { self?.reset() }
-            }
-        }
+        controls = FullscreenBackControls(controller: controller) { [weak self] in self?.back() }
         NotificationCenter.default.addObserver(self, selector: #selector(pause), name: UIApplication.willResignActiveNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(resume), name: UIApplication.didBecomeActiveNotification, object: nil)
+    }
+
+    func setActive(_ active: Bool, callback: Callback? = nil) {
+        guard !active || foreground else { callback?.error("Fullscreen requires the foreground app."); return }
+        if !active { hasBackHandler = false; reset() }
+        controller?.setFullscreenLayout(active)
+        callback?.success()
+    }
+
+    func setBackHandler(_ enabled: Bool, callback: Callback) {
+        guard !enabled || (foreground && isFullscreen) else {
+            callback.error("Back handler requires foreground fullscreen."); return
+        }
+        hasBackHandler = enabled
+        callback.success()
+    }
+
+    func updateControls() {
+        controls.update(active: isFullscreen, enabled: foreground, theme: controller?.themeType ?? "dark")
+    }
+
+    func back() {
+        guard foreground, isFullscreen else { return }
+        let script = hasBackHandler
+            ? "document.dispatchEvent(new Event('fullscreenbackbutton'));"
+            : "Promise.resolve(document.exitFullscreen()).catch(console.error);"
+        controller?.webView.evaluateJavaScript(script, completionHandler: nil)
     }
 
     func setOrientation(_ value: Any?, callback: Callback) {
@@ -49,19 +74,16 @@ final class WebFullscreen: NSObject {
         restorePolicy()
     }
 
-    private var isFullscreen: Bool {
-        let state = controller?.webView.fullscreenState
-        return state == .inFullscreen || state == .enteringFullscreen
-    }
-
     @objc private func pause() {
         foreground = false
+        updateControls()
         if pending != nil { reset() }
         else { cancelPending(); restorePolicy() }
     }
 
     @objc private func resume() {
         foreground = true
+        updateControls()
         if let mask = requestedOrientation, isFullscreen, let scene { apply(mask, scene: scene) }
     }
 

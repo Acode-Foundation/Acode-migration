@@ -39,6 +39,10 @@ final class AMBBannerLayout {
         guard !layingOut, let controller = plugin?.viewController else { return }
         layingOut = true
         defer { layingOut = false }
+        if controller.isFullscreenLayout {
+            for banner in banners { banner.bannerView?.isHidden = true }
+            return
+        }
         let root = controller.view!
         let safe = root.safeAreaLayoutGuide.layoutFrame
         let bottom = min(safe.maxY, root.keyboardLayoutGuide.layoutFrame.minY)
