@@ -122,6 +122,11 @@ cd Acode
 # Install dependencies
 npm ci
 
+# Allow the install scripts npm blocks by default (builds the local
+# @codemirror/lsp-client, the @parcel/watcher native module, and core-js)
+npm install-scripts approve codemirror-lsp-client @parcel/watcher core-js core-js-pure
+npm ci
+
 # Build the APK
 npm run build -- dev apk
 ```
@@ -130,6 +135,10 @@ The APK will be at: `platforms/android/app/build/outputs/apk/<edition>/debug/app
 
 > [!NOTE]
 > `@codemirror/lsp-client` comes from the `codemirror-lsp-client` git submodule and is installed as a local `file:` dependency, so initialize the submodule before running `npm ci` — see [Troubleshooting](#-troubleshooting).
+>
+> npm's `allowScripts` feature blocks the dependency's `prepare` script, which
+> generates its `dist/index.js` entry point. Approve the scripts before
+> installing — see [Troubleshooting](#-troubleshooting).
 
 ## iOS development (port in progress)
 
@@ -400,6 +409,19 @@ If dependency installation fails because it is missing, initialize it first:
 
 ```bash
 git submodule update --init --recursive
+npm ci
+```
+
+### Blocked install scripts (`Module not found: Can't resolve '@codemirror/lsp-client'`)
+
+npm's `allowScripts` security feature blocks install scripts by default. For this
+project that includes the `prepare` script of the local `@codemirror/lsp-client`
+dependency, which generates its `dist/index.js` entry point. If the build fails
+with a missing `@codemirror/lsp-client` module (or a missing `@parcel/watcher`
+native module), approve the scripts and reinstall:
+
+```bash
+npm install-scripts approve codemirror-lsp-client @parcel/watcher core-js core-js-pure
 npm ci
 ```
 

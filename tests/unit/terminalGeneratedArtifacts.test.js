@@ -156,12 +156,15 @@ describe("generated rootfs artifacts", () => {
 
 	it("does not touch generated artifacts on a normal launch", () => {
 		const source = readLauncher();
-		const call = "refresh_generated_artifacts";
-		// Everything after the last call is launched for every terminal, not
-		// only while installing.
-		const launchPath = source.slice(source.lastIndexOf(call) + call.length);
+		// The install block exits before this point, so everything from here on
+		// runs for every terminal, not only while installing.
+		const launchStart = source.indexOf("# One file per session:");
 
-		expect(launchPath).not.toContain(call);
+		expect(launchStart).toBeGreaterThan(-1);
+
+		const launchPath = source.slice(launchStart);
+
+		expect(launchPath).not.toContain("refresh_generated_artifacts");
 		expect(launchPath).not.toContain("write_version_marker");
 	});
 });

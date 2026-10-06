@@ -1,8 +1,18 @@
 #!/bin/bash
 
+
+
+
 # ============================================================
 # Acode Ubuntu Rootfs launcher
 # ============================================================
+
+
+# Bump when a generated artifact below changes so existing installs refresh it.
+# Presence checks alone pin a stale script on disk forever, which would keep a
+# fixed bug alive for every user who installed before the fix shipped.
+ACODE_GENERATED_VERSION="5"
+
 
 export PATH="/bin:/sbin:/usr/bin:/usr/sbin:/usr/share/bin:/usr/share/sbin:/usr/local/bin:/usr/local/sbin:/system/bin:/system/xbin:$PREFIX/local/bin"
 export HOME="/public"
@@ -12,10 +22,7 @@ export PS1='\[\e[38;5;46m\]\u\[\e[39m\]@localhost \[\e[39m\]\w \[\e[0m\]\$ '
 INSTALLING=false
 FAILSAFE=false
 
-# Bump when a generated artifact below changes so existing installs refresh it.
-# Presence checks alone pin a stale script on disk forever, which would keep a
-# fixed bug alive for every user who installed before the fix shipped.
-ACODE_GENERATED_VERSION="4"
+
 ACODE_VERSION_FILE="/etc/acode/generated.version"
 ACODE_GROUP_FILE="/etc/group"
 ACODE_GROUP_LOCK="/etc/.acode-group.lock"
@@ -24,9 +31,7 @@ ACODE_GROUP_LOCK_GRACE="5"
 # Node.js release the rootfs installs from NodeSource. Ubuntu 24.04 ships
 # nodejs 18, which is past end of life.
 ACODE_NODE_MAJOR="26.x"
-ACODE_APT_SOURCES="/etc/apt/sources.list.d/nodesource.sources"
-ACODE_APT_KEYRING="/usr/share/keyrings/nodesource.gpg"
-ACODE_APT_PREFERENCES="/etc/apt/preferences.d"
+ACODE_NODESOURCE_SETUP="https://deb.nodesource.com/setup_$ACODE_NODE_MAJOR"
 
 # ============================================================
 # Parse arguments
@@ -299,73 +304,40 @@ run_node_jemalloc_hook() {
 # NodeSource package repository
 #
 # Ubuntu 24.04 ships nodejs 18, which is past end of life, so anything the
-# npm-based LSP installs need gets an unsupported runtime. This registers the
-# NodeSource repository the way deb.nodesource.com/setup_26.x does, but inline:
-# the published script is not used because it runs `apt update`, installs
-# pre-requisites and rewrites the key on every run, while this only has to
-# happen once per generated version and has to stay best effort. The apt pin
-# keeps `apt install nodejs` on NodeSource.
+# npm-based LSP installs need gets an unsupported runtime. This is the official
+# NodeSource bootstrap for $ACODE_NODE_MAJOR, run after curl has been installed
+# because a fresh rootfs does not ship it. The script is best effort: it may
+# fail offline, and then the rootfs simply keeps Ubuntu's nodejs.
 # ============================================================
 
 configure_nodesource_repo() {
-    local arch=""
-
-    # Architecture packages are fetched for; NodeSource only builds these two.
-    arch="$(dpkg --print-architecture 2>/dev/null)"
-    case "$arch" in
-        amd64|arm64) ;;
-        *)
-            log_warn "NodeSource has no packages for '${arch:-unknown}' - keeping Ubuntu's nodejs"
+    if ! type -p curl >/dev/null 2>&1; then
+        # curl can only be installed once the package lists exist, and a fresh
+        # rootfs has none, so the update has to come first.
+        if ! apt-get update || ! apt-get install -y ca-certificates curl; then
+            log_warn "Could not install curl - keeping Ubuntu's nodejs"
             return 0
-            ;;
-    esac
+        fi
+    fi
 
-    if needs_refresh "$ACODE_APT_SOURCES"; then
-        log_step "Installing the NodeSource signing key..."
+    log_step "Adding the NodeSource $ACODE_NODE_MAJOR repository..."
 
-        # The key and the lists have to be registered before the update below,
-        # and curl/gnupg are what the rootfs may still be missing.
-        if ! apt-get install -y --no-install-recommends ca-certificates curl gnupg; then
-            log_warn "Could not install curl/gnupg - keeping Ubuntu's nodejs"
+    # The bootstrap resolves the host twice: once for the script itself and
+    # again for the signing key, after it has run apt. A single resolver hiccup
+    # between the two leaves the repository unconfigured, so retry once.
+    local attempt=""
+    for attempt in 1 2; do
+        if curl -fsSL "$ACODE_NODESOURCE_SETUP" | bash; then
+            log_ok "Node.js $ACODE_NODE_MAJOR repository ready"
             return 0
         fi
 
-        mkdir -p \
-            "$(dirname "$ACODE_APT_SOURCES")" \
-            "$(dirname "$ACODE_APT_KEYRING")" \
-            "$ACODE_APT_PREFERENCES"
+        [ "$attempt" = "1" ] && sleep 3
+    done
 
-        if ! curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key |
-            gpg --dearmor -o "$ACODE_APT_KEYRING"; then
-            log_warn "Could not import the NodeSource signing key - keeping Ubuntu's nodejs"
-            return 0
-        fi
-
-        chmod 644 "$ACODE_APT_KEYRING"
-
-        cat > "$ACODE_APT_SOURCES" <<EOF
-# acode-generated-version: $ACODE_GENERATED_VERSION
-Types: deb
-URIs: https://deb.nodesource.com/node_$ACODE_NODE_MAJOR
-Suites: nodistro
-Components: main
-Architectures: $arch
-Signed-By: $ACODE_APT_KEYRING
-EOF
-
-        # The pin decides which suite wins when a package exists in both.
-        cat > "$ACODE_APT_PREFERENCES/nodejs" <<'EOF'
-Package: nodejs
-Pin: origin deb.nodesource.com
-Pin-Priority: 600
-EOF
-    fi
-
-    if apt-get update; then
-        log_ok "NodeSource repository configured"
-    else
-        log_warn "Could not read the NodeSource package lists - keeping Ubuntu's nodejs"
-    fi
+    log_warn "Could not configure NodeSource - keeping Ubuntu's nodejs"
+    log_step "You may setup the nodesource yourself"
+    return 0
 }
 
 # ============================================================
@@ -405,144 +377,6 @@ log_warn() {
 log_error() {
     printf '%b[!] %s%b\n' "$LOG_ERROR" "$*" "$LOG_RESET" >&2
 }
-
-# ============================================================
-# One-time rootfs installation
-#
-# IMPORTANT:
-# Normal launches should NEVER run apt.
-# ============================================================
-
-if [ "$INSTALLING" = true ]; then
-    export DEBIAN_FRONTEND=noninteractive
-
-    log_step "Configuring rootfs..."
-
-    # --------------------------------------------------------
-    # Configure timezone. /etc/localtime is linked by sync_timezone() once
-    # tzdata actually provides the zone file.
-    # --------------------------------------------------------
-
-    mkdir -p /etc
-
-    if [ -n "$ANDROID_TZ" ]; then
-        echo "$ANDROID_TZ" > /etc/timezone
-        log_ok "Timezone: $ANDROID_TZ"
-    else
-        echo "Etc/UTC" > /etc/timezone
-        log_ok "Timezone: UTC"
-    fi
-
-    # Deployed before the first package install so a later `apt install nodejs`
-    # already finds the dpkg hook in place.
-    log_step "Installing the Node.js jemalloc hook..."
-    install_node_jemalloc_hook
-    log_ok "Node.js jemalloc hook installed"
-
-    # Registered before the package lists are fetched below, so that one update
-    # covers NodeSource too.
-    log_step "Configuring the Node.js package repository..."
-    configure_nodesource_repo
-    log_ok "Node.js package repository ready"
-
-    # tzdata lets /etc/localtime resolve and libjemalloc2 backs the Node.js
-    # wrapper. Best effort and time-bounded so an offline install still works.
-    # Setup reaches the network here, for the package lists and NodeSource.
-
-    APT_PACKAGES=""
-    [ -d /usr/share/zoneinfo ] || APT_PACKAGES="tzdata"
-    dpkg -s libjemalloc2 >/dev/null 2>&1 || APT_PACKAGES="$APT_PACKAGES libjemalloc2"
-
-    if [ -n "$APT_PACKAGES" ]; then
-        log_step "Installing required packages: $APT_PACKAGES"
-
-        if apt-get update; then
-            log_ok "Package lists updated"
-        else
-            log_warn "Could not update package lists - continuing without $APT_PACKAGES"
-        fi
-
-        if apt-get install -y $APT_PACKAGES; then
-            log_ok "Installed: $APT_PACKAGES"
-        else
-            log_warn "Could not install: $APT_PACKAGES - continuing without them"
-        fi
-    else
-        log_ok "Required packages already present"
-    fi
-
-    log_step "Applying timezone..."
-    sync_timezone
-    run_node_jemalloc_hook
-    log_ok "Timezone and Node.js runtime configured"
-
-    # --------------------------------------------------------
-    # Rootfs filesystem setup
-    # --------------------------------------------------------
-
-    log_step "Preparing rootfs layout..."
-
-    mkdir -p /linkerconfig
-
-    if [ ! -f /linkerconfig/ld.config.txt ]; then
-        touch /linkerconfig/ld.config.txt
-    fi
-
-    mkdir -p "$HOME"
-
-    if [ ! -f "$HOME/.bashrc" ]; then
-        touch "$HOME/.bashrc" && chmod 644 "$HOME/.bashrc"
-    fi
-
-    # --------------------------------------------------------
-    # Generated artifacts
-    # --------------------------------------------------------
-
-    log_step "Writing shell configuration..."
-
-    refresh_generated_artifacts
-
-    log_ok "Shell configuration ready"
-
-    # --------------------------------------------------------
-    # Register the Android GIDs so `groups`/`id` can name them
-    # --------------------------------------------------------
-
-    log_step "Registering Android groups..."
-    register_android_groups
-    log_ok "Android groups registered"
-
-    # --------------------------------------------------------
-    # Mark rootfs as configured
-    # --------------------------------------------------------
-
-    mkdir -p "$PREFIX/.configured"
-
-    touch "$PREFIX/.configured/rootfs"
-
-    # The install path reports success purely from this exit code, so verify the
-    # artifacts actually landed instead of announcing completion unconditionally.
-    missing=""
-    for required in \
-        "$PREFIX/ubuntu/bin/sh" \
-        "$PREFIX/ubuntu/bin/bash" \
-        "$PREFIX/ubuntu/etc/group" \
-        "$PREFIX/ubuntu/initrc" \
-        "$PREFIX/ubuntu/usr/local/bin/acode" \
-        "$PREFIX/.configured/rootfs"; do
-        [ -e "$required" ] || missing="$missing $required"
-    done
-
-    if [ -n "$missing" ]; then
-        log_error "Rootfs configuration incomplete, missing:$missing"
-        exit 1
-    fi
-
-    write_version_marker
-
-    log_ok "Rootfs configuration complete."
-    exit 0
-fi
 
 # ============================================================
 # Generated artifacts
@@ -864,14 +698,17 @@ alias clear='reset'
 # ============================================================
 # Prompt
 #
-# Ubuntu's /etc/bash.bashrc installs a plain prompt on every interactive
-# shell, and the rc files below load after this point, so the colored prompt
-# is written here and repaired again if the user has no prompt of their own.
+# /etc/bash.bashrc colors its prompt for TERM=*-256color but the stock
+# ~/.bashrc does not, and the user's rc file is sourced last, so the colored
+# Acode prompt is written here and put back below unless the user's own rc
+# file replaced it with a prompt they wrote.
 # ============================================================
+
+ACODE_PS1='\[\033[1;32m\]\u\[\033[0m\]@localhost \[\033[1;34m\]$_PS1_PATH\[\033[0m\] ${_PS1_MARK:-$} '
 
 PROMPT_COMMAND='_PS1_PATH=$(_shorten_path); _PS1_EXIT=$?; if [ "$_PS1_EXIT" -ne 0 ]; then _PS1_MARK="\[\033[31m\]>$\[\033[0m\]"; else _PS1_MARK="$"; fi'
 
-PS1='\[\033[1;32m\]\u\[\033[0m\]@localhost \[\033[1;34m\]$_PS1_PATH\[\033[0m\] ${_PS1_MARK:-$} '
+PS1="$ACODE_PS1"
 
 # ============================================================
 # User configuration
@@ -881,27 +718,172 @@ if [ -f /etc/bash.bashrc ]; then
     source /etc/bash.bashrc
 fi
 
-# Snapshot what the rootfs left in PS1 before the user's rc file runs, so a
-# prompt that survives it unchanged can be told apart from a deliberate one.
+# Snapshot what the system rc files leave in PS1, and replay the stock
+# ~/.bashrc in a subshell: it installs its own plain prompt, which is still a
+# rootfs default rather than a user choice.
 _ACODE_ROOTFS_PS1="$PS1"
+_ACODE_STOCK_PS1=""
+for _stock in /etc/skel/.bashrc /usr/share/base-files/dot.bashrc; do
+    if [ -f "$_stock" ]; then
+        _ACODE_STOCK_PS1="$(source "$_stock" >/dev/null 2>&1; printf '%s' "$PS1")"
+        break
+    fi
+done
 
 if [ -f "$HOME/.bashrc" ]; then
     source "$HOME/.bashrc"
 fi
 
-# A user prompt always wins. The plain prompt the rootfs ships is only kept
-# when it survived the user's rc file untouched, which means it was never a
-# choice, so the colored prompt goes back.
-if [ "$PS1" = "$_ACODE_ROOTFS_PS1" ]; then
-    PS1='\[\033[1;32m\]\u\[\033[0m\]@localhost \[\033[1;34m\]$_PS1_PATH\[\033[0m\] ${_PS1_MARK:-$} '
+# A user prompt always wins; the rootfs defaults never do.
+if [ "$PS1" = "$_ACODE_ROOTFS_PS1" ] ||
+    [ "$PS1" = "${_ACODE_STOCK_PS1:-$_ACODE_ROOTFS_PS1}" ]; then
+    PS1="$ACODE_PS1"
 fi
 
-unset _ACODE_ROOTFS_PS1
+unset _ACODE_ROOTFS_PS1 _ACODE_STOCK_PS1 _stock ACODE_PS1
 EOF
     fi
 
     chmod +x "$PREFIX/ubuntu/initrc"
 }
+
+# ============================================================
+# One-time rootfs installation
+#
+# IMPORTANT:
+# Normal launches should NEVER run apt.
+# ============================================================
+
+if [ "$INSTALLING" = true ]; then
+    export DEBIAN_FRONTEND=noninteractive
+
+    log_step "Configuring rootfs..."
+
+    # --------------------------------------------------------
+    # Configure timezone. /etc/localtime is linked by sync_timezone() once
+    # tzdata actually provides the zone file.
+    # --------------------------------------------------------
+
+    mkdir -p /etc
+
+    if [ -n "$ANDROID_TZ" ]; then
+        echo "$ANDROID_TZ" > /etc/timezone
+        log_ok "Timezone: $ANDROID_TZ"
+    else
+        echo "Etc/UTC" > /etc/timezone
+        log_ok "Timezone: UTC"
+    fi
+
+    # Deployed before the first package install so a later `apt install nodejs`
+    # already finds the dpkg hook in place.
+    log_step "Installing the Node.js jemalloc hook..."
+    install_node_jemalloc_hook
+    log_ok "Node.js jemalloc hook installed"
+
+    # Registered before the package lists are fetched below, so that one update
+    # covers NodeSource too.
+    log_step "Configuring the Node.js package repository..."
+    configure_nodesource_repo
+    log_ok "Node.js package repository ready"
+
+    # tzdata lets /etc/localtime resolve and libjemalloc2 backs the Node.js
+    # wrapper. Best effort and time-bounded so an offline install still works.
+    # Setup reaches the network here, for the package lists and NodeSource.
+
+    APT_PACKAGES=""
+    [ -d /usr/share/zoneinfo ] || APT_PACKAGES="tzdata"
+    dpkg -s libjemalloc2 >/dev/null 2>&1 || APT_PACKAGES="$APT_PACKAGES libjemalloc2"
+
+    if [ -n "$APT_PACKAGES" ]; then
+        log_step "Installing required packages: $APT_PACKAGES"
+
+        if apt-get update; then
+            log_ok "Package lists updated"
+        else
+            log_warn "Could not update package lists - continuing without $APT_PACKAGES"
+        fi
+
+        if apt-get install -y $APT_PACKAGES; then
+            log_ok "Installed: $APT_PACKAGES"
+        else
+            log_warn "Could not install: $APT_PACKAGES - continuing without them"
+        fi
+    else
+        log_ok "Required packages already present"
+    fi
+
+    log_step "Applying timezone..."
+    sync_timezone
+    run_node_jemalloc_hook
+    log_ok "Timezone and Node.js runtime configured"
+
+    # --------------------------------------------------------
+    # Rootfs filesystem setup
+    # --------------------------------------------------------
+
+    log_step "Preparing rootfs layout..."
+
+    mkdir -p /linkerconfig
+
+    if [ ! -f /linkerconfig/ld.config.txt ]; then
+        touch /linkerconfig/ld.config.txt
+    fi
+
+    mkdir -p "$HOME"
+
+    if [ ! -f "$HOME/.bashrc" ]; then
+        touch "$HOME/.bashrc" && chmod 644 "$HOME/.bashrc"
+    fi
+
+    # --------------------------------------------------------
+    # Generated artifacts
+    # --------------------------------------------------------
+
+    log_step "Writing shell configuration..."
+
+    refresh_generated_artifacts
+
+    log_ok "Shell configuration ready"
+
+    # --------------------------------------------------------
+    # Register the Android GIDs so `groups`/`id` can name them
+    # --------------------------------------------------------
+
+    log_step "Registering Android groups..."
+    register_android_groups
+    log_ok "Android groups registered"
+
+    # --------------------------------------------------------
+    # Mark rootfs as configured
+    # --------------------------------------------------------
+
+    mkdir -p "$PREFIX/.configured"
+
+    touch "$PREFIX/.configured/rootfs"
+
+    # The install path reports success purely from this exit code, so verify the
+    # artifacts actually landed instead of announcing completion unconditionally.
+    missing=""
+    for required in \
+        "$PREFIX/ubuntu/bin/sh" \
+        "$PREFIX/ubuntu/bin/bash" \
+        "$PREFIX/ubuntu/etc/group" \
+        "$PREFIX/ubuntu/initrc" \
+        "$PREFIX/ubuntu/usr/local/bin/acode" \
+        "$PREFIX/.configured/rootfs"; do
+        [ -e "$required" ] || missing="$missing $required"
+    done
+
+    if [ -n "$missing" ]; then
+        log_error "Rootfs configuration incomplete, missing:$missing"
+        exit 1
+    fi
+
+    write_version_marker
+
+    log_ok "Rootfs configuration complete."
+    exit 0
+fi
 
 # ============================================================
 
