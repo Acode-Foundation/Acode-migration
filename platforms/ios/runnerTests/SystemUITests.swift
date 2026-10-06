@@ -62,7 +62,7 @@ final class SystemUITests: BridgeTestCase {
     func testFullscreenOrientationRequiresSessionAndRestoresPolicyOnExit() async throws {
         let webView = try await editorWebView()
         let scene = try XCTUnwrap(webView.window?.windowScene)
-        XCTAssertFalse(webView.configuration.preferences.isElementFullscreenEnabled)
+        XCTAssertTrue(webView.configuration.preferences.isElementFullscreenEnabled)
         var responder: UIResponder? = webView
         while responder != nil, !(responder is WebViewController) { responder = responder?.next }
         let controller = try XCTUnwrap(responder as? WebViewController)

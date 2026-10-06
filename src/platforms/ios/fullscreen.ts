@@ -1,3 +1,6 @@
+import fullscreenLayout from "./fullscreenLayout";
+import fullscreenStyles from "./fullscreenStyles";
+
 // Keep the app's WebView in place: WebKit's browser presentation changes its
 // coordinate space and adds browser controls over plugin content.
 export default function installFullscreen(
@@ -7,19 +10,30 @@ export default function installFullscreen(
 	let restore: (() => void) | undefined;
 	let queue = Promise.resolve();
 	const backKeys = new WeakSet<Event>();
+	const nativeElement = Object.getOwnPropertyDescriptor(
+		Document.prototype,
+		"fullscreenElement",
+	)?.get;
+	const nativeShadowElement = Object.getOwnPropertyDescriptor(
+		ShadowRoot.prototype,
+		"fullscreenElement",
+	)?.get;
+	const nativeExit = document.exitFullscreen;
 	const observer = new MutationObserver(() => {
 		if (owner && !owner.isConnected) void exit();
 	});
 	Object.defineProperty(document, "fullscreenElement", {
 		configurable: true,
 		get() {
-			return retarget(document);
+			return owner
+				? retarget(document)
+				: (nativeElement?.call(document) ?? null);
 		},
 	});
 	Object.defineProperty(ShadowRoot.prototype, "fullscreenElement", {
 		configurable: true,
 		get() {
-			return retarget(this);
+			return owner ? retarget(this) : (nativeShadowElement?.call(this) ?? null);
 		},
 	});
 	Object.defineProperty(document, "fullscreenEnabled", {
@@ -38,33 +52,24 @@ export default function installFullscreen(
 			if (owner === target) return;
 			if (
 				owner ||
+				nativeElement?.call(document) ||
 				target.matches(":popover-open") ||
 				target instanceof HTMLDialogElement
 			)
 				throw new TypeError("Another presentation is already active.");
-			const style = document.createElement("style");
-			style.textContent = `[data-acode-fullscreen] {
-				position: fixed !important; inset: 0 !important;
-				width: 100% !important; height: 100% !important;
-				max-width: none !important; max-height: none !important;
-				margin: 0 !important; padding: 0 !important; border: 0 !important;
-				box-sizing: border-box !important;
-			}`;
-			const root = target.getRootNode();
-			(root instanceof ShadowRoot ? root : document.head).append(style);
 			const popover = target.getAttribute("popover");
-			const marker = target.getAttribute("data-acode-fullscreen");
+			const restoreLayout = fullscreenLayout(target);
+			let restoreStyles = () => {};
 			restore = () => {
 				target.hidePopover();
 				if (popover === null) target.removeAttribute("popover");
 				else target.setAttribute("popover", popover);
-				if (marker === null) target.removeAttribute("data-acode-fullscreen");
-				else target.setAttribute("data-acode-fullscreen", marker);
-				style.remove();
+				restoreLayout();
+				restoreStyles();
 			};
 			try {
+				restoreStyles = fullscreenStyles(target);
 				target.setAttribute("popover", "manual");
-				target.setAttribute("data-acode-fullscreen", "");
 				target.showPopover();
 				await setActive(true);
 				if (!target.isConnected)
@@ -126,6 +131,13 @@ export default function installFullscreen(
 			}
 		}
 		if (!menu) return;
+		if (menu instanceof HTMLDialogElement) {
+			event.stopImmediatePropagation();
+			if (typeof menu.requestClose === "function") menu.requestClose();
+			else if (menu.dispatchEvent(new Event("cancel", { cancelable: true })))
+				menu.close();
+			return;
+		}
 		let focused = document.activeElement;
 		while (focused?.shadowRoot?.activeElement)
 			focused = focused.shadowRoot.activeElement;
@@ -158,6 +170,7 @@ export default function installFullscreen(
 	}
 	function exit() {
 		return schedule(async () => {
+			if (nativeElement?.call(document)) await nativeExit.call(document);
 			if (!owner) return;
 			const target = owner;
 			await setActive(false);

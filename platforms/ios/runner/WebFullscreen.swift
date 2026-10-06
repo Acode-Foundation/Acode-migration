@@ -5,19 +5,32 @@ import WebKit
 final class WebFullscreen: NSObject {
     private weak var controller: WebViewController?
     private weak var scene: UIWindowScene?
+    private var observation: NSKeyValueObservation?
     private var task: Task<Void, Never>?
     private var pending: Callback?
     private var requestID = UUID()
     private var foreground = true
     private var controls: FullscreenBackControls!
     private var hasBackHandler = false
-    var isFullscreen: Bool { controller?.isFullscreenLayout == true }
+    var isFullscreen: Bool {
+        let state = controller?.webView.fullscreenState
+        return controller?.isFullscreenLayout == true || state == .inFullscreen || state == .enteringFullscreen
+    }
     private(set) var requestedOrientation: UIInterfaceOrientationMask?
 
     init(controller: WebViewController) {
         self.controller = controller
         super.init()
         controls = FullscreenBackControls(controller: controller) { [weak self] in self?.back() }
+        observation = controller.webView.observe(\.fullscreenState, options: [.new]) { [weak self] webView, _ in
+            MainActor.assumeIsolated {
+                guard let self, self.controller?.isFullscreenLayout != true else { return }
+                if webView.fullscreenState == .notInFullscreen || webView.fullscreenState == .exitingFullscreen {
+                    self.hasBackHandler = false
+                    self.reset()
+                }
+            }
+        }
         NotificationCenter.default.addObserver(self, selector: #selector(pause), name: UIApplication.willResignActiveNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(resume), name: UIApplication.didBecomeActiveNotification, object: nil)
     }
@@ -38,7 +51,7 @@ final class WebFullscreen: NSObject {
     }
 
     func updateControls() {
-        controls.update(active: isFullscreen, enabled: foreground, theme: controller?.themeType ?? "dark")
+        controls.update(active: controller?.isFullscreenLayout == true, enabled: foreground, theme: controller?.themeType ?? "dark")
     }
 
     func back() {

@@ -26,6 +26,7 @@ final class WebViewController: UIViewController {
         contentController.add(WeakScriptMessageHandler(bridge), name: "exec")
         config.userContentController = contentController
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
+        config.preferences.isElementFullscreenEnabled = true
 
         config.allowsInlineMediaPlayback = true
         webView = AppWebView(frame: .zero, configuration: config)

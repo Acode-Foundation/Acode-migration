@@ -480,10 +480,11 @@ click handlers with feedback enabled. Eight focused editor, file-browser and
 haptic checks pass per edition; the normal-app project check above also used the
 quick-tools Save button. Physical haptic sensation remains unverified.
 
-The main WebView implements the standard element fullscreen API using a manual
+The main WebView implements element fullscreen using a manual
 popover and edge-to-edge native layout, preserving iframe state and touch
-coordinates without WebKit's browser fullscreen presentation. Preview WebViews
-retain WebKit fullscreen. The existing `orientation` plugin API applies
+coordinates without WebKit's browser fullscreen presentation. Fullscreen styles
+apply to the owner and its shadow hosts; inline layout overrides are restored on
+exit. Iframe documents and preview WebViews retain WebKit fullscreen. The existing `orientation` plugin API applies
 portrait/landscape requests only during foreground fullscreen, releases its policy
 on exit, reload or unlock, and temporarily restores normal rotation while inactive.
 A completed downward swipe (at least 40 points) starting anywhere across the top
@@ -493,7 +494,8 @@ on backgrounding or on exit; tapping restarts its hide timer. A completed left-e
 swipe (at least 60 points) delivers Back directly. `fullscreen.setBackHandler(callback | null)`
 receives these actions through `fullscreenbackbutton`; without a handler they exit
 fullscreen. A visible modal within the fullscreen owner gets the first opportunity
-to handle Escape, regardless of focus, so Back closes Astray's open pause menu and
+to handle Escape, regardless of focus; native dialogs receive a cancellable close
+request that consumes Back. Back closes Astray's open pause menu and
 resumes the game even after interacting with the menu or revealing the native button.
 Registration clears on exit or reload, survives orientation unlock, and delivery
 is disabled while inactive. Games such as Astray can open their pause menu while
