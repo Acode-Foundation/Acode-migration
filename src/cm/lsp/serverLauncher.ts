@@ -4,6 +4,7 @@ import confirm from "dialogs/confirm";
 import loader from "dialogs/loader";
 import { buildShellArchCase } from "./installerUtils";
 import {
+  buildNpmInstallCommand,
   formatCommand,
   prepareAptCommand,
   quoteArg,
@@ -500,11 +501,11 @@ function buildInstallCommand(
         : null;
     case "npm": {
       if (!spec.packages.length) return null;
-      const npmCommand = spec.npmCommand || "npm";
-      const installFlags = spec.global !== false ? "install -g" : "install";
-      return prepareAptCommand(
-        `apt-get install -y nodejs npm && ${npmCommand} ${installFlags} ${spec.packages.map((entry) => quoteArg(entry)).join(" ")}`,
-      );
+      return buildNpmInstallCommand({
+        npmCommand: spec.npmCommand,
+        global: spec.global,
+        packages: spec.packages,
+      });
     }
     case "pip": {
       if (!spec.packages.length) return null;

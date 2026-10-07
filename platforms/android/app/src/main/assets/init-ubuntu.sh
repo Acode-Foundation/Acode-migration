@@ -11,7 +11,7 @@
 # Bump when a generated artifact below changes so existing installs refresh it.
 # Presence checks alone pin a stale script on disk forever, which would keep a
 # fixed bug alive for every user who installed before the fix shipped.
-ACODE_GENERATED_VERSION="5"
+ACODE_GENERATED_VERSION="6"
 
 
 export PATH="/bin:/sbin:/usr/bin:/usr/sbin:/usr/share/bin:/usr/share/sbin:/usr/local/bin:/usr/local/sbin:/system/bin:/system/xbin:$PREFIX/local/bin"
@@ -31,7 +31,9 @@ ACODE_GROUP_LOCK_GRACE="5"
 # Node.js release the rootfs installs from NodeSource. Ubuntu 24.04 ships
 # nodejs 18, which is past end of life.
 ACODE_NODE_MAJOR="26.x"
-ACODE_NODESOURCE_SETUP="https://deb.nodesource.com/setup_$ACODE_NODE_MAJOR"
+ACODE_APT_SOURCES="/etc/apt/sources.list.d/nodesource.sources"
+ACODE_APT_KEYRING="/usr/share/keyrings/nodesource.gpg"
+ACODE_APT_PREFERENCES="/etc/apt/preferences.d"
 
 # ============================================================
 # Parse arguments
@@ -203,9 +205,8 @@ sync_timezone() {
 #
 # A pure "does it exist" check would pin a stale generated script on disk
 # forever, so a bug fixed here would never reach anyone who installed earlier.
-# /etc/acode/generated.version is written by the install path once every
-# artifact has been regenerated; if it is missing or older, the artifacts are
-# rewritten.
+# /etc/acode/generated.version is written once every artifact has been
+# regenerated; if it is missing or older, the artifacts are rewritten.
 # ============================================================
 
 is_current_version() {
@@ -304,40 +305,73 @@ run_node_jemalloc_hook() {
 # NodeSource package repository
 #
 # Ubuntu 24.04 ships nodejs 18, which is past end of life, so anything the
-# npm-based LSP installs need gets an unsupported runtime. This is the official
-# NodeSource bootstrap for $ACODE_NODE_MAJOR, run after curl has been installed
-# because a fresh rootfs does not ship it. The script is best effort: it may
-# fail offline, and then the rootfs simply keeps Ubuntu's nodejs.
+# npm-based LSP installs need gets an unsupported runtime. This registers the
+# NodeSource repository the way deb.nodesource.com/setup_26.x does, but inline:
+# the published script is not used because it runs `apt update`, installs
+# pre-requisites and rewrites the key on every run, while this only has to
+# happen once per generated version and has to stay best effort. The apt pin
+# keeps `apt install nodejs` on NodeSource.
 # ============================================================
 
 configure_nodesource_repo() {
-    if ! type -p curl >/dev/null 2>&1; then
-        # curl can only be installed once the package lists exist, and a fresh
-        # rootfs has none, so the update has to come first.
-        if ! apt-get update || ! apt-get install -y ca-certificates curl; then
-            log_warn "Could not install curl - keeping Ubuntu's nodejs"
+    local arch=""
+
+    # Architecture packages are fetched for; NodeSource only builds these two.
+    arch="$(dpkg --print-architecture 2>/dev/null)"
+    case "$arch" in
+        amd64|arm64) ;;
+        *)
+            log_warn "NodeSource has no packages for '${arch:-unknown}' - keeping Ubuntu's nodejs"
+            return 0
+            ;;
+    esac
+
+    if needs_refresh "$ACODE_APT_SOURCES"; then
+        log_step "Installing the NodeSource signing key..."
+
+        # The key and the lists have to be registered before the update below,
+        # and curl/gnupg are what the rootfs may still be missing.
+        if ! apt-get install -y --no-install-recommends ca-certificates curl gnupg; then
+            log_warn "Could not install curl/gnupg - keeping Ubuntu's nodejs"
             return 0
         fi
+
+        mkdir -p \
+            "$(dirname "$ACODE_APT_SOURCES")" \
+            "$(dirname "$ACODE_APT_KEYRING")" \
+            "$ACODE_APT_PREFERENCES"
+
+        if ! curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key |
+            gpg --dearmor -o "$ACODE_APT_KEYRING"; then
+            log_warn "Could not import the NodeSource signing key - keeping Ubuntu's nodejs"
+            return 0
+        fi
+
+        chmod 644 "$ACODE_APT_KEYRING"
+
+        cat > "$ACODE_APT_SOURCES" <<EOF
+# acode-generated-version: $ACODE_GENERATED_VERSION
+Types: deb
+URIs: https://deb.nodesource.com/node_$ACODE_NODE_MAJOR
+Suites: nodistro
+Components: main
+Architectures: $arch
+Signed-By: $ACODE_APT_KEYRING
+EOF
+
+        # The pin decides which suite wins when a package exists in both.
+        cat > "$ACODE_APT_PREFERENCES/nodejs" <<'EOF'
+Package: nodejs
+Pin: origin deb.nodesource.com
+Pin-Priority: 600
+EOF
     fi
 
-    log_step "Adding the NodeSource $ACODE_NODE_MAJOR repository..."
-
-    # The bootstrap resolves the host twice: once for the script itself and
-    # again for the signing key, after it has run apt. A single resolver hiccup
-    # between the two leaves the repository unconfigured, so retry once.
-    local attempt=""
-    for attempt in 1 2; do
-        if curl -fsSL "$ACODE_NODESOURCE_SETUP" | bash; then
-            log_ok "Node.js $ACODE_NODE_MAJOR repository ready"
-            return 0
-        fi
-
-        [ "$attempt" = "1" ] && sleep 3
-    done
-
-    log_warn "Could not configure NodeSource - keeping Ubuntu's nodejs"
-    log_step "You may setup the nodesource yourself"
-    return 0
+    if apt-get update; then
+        log_ok "NodeSource repository configured"
+    else
+        log_warn "Could not read the NodeSource package lists - keeping Ubuntu's nodejs"
+    fi
 }
 
 # ============================================================
@@ -382,10 +416,10 @@ log_error() {
 # Generated artifacts
 #
 # initrc, the acode CLI and the MOTD live in the rootfs rather than in this
-# launcher, so they can be rewritten without reinstalling the sandbox. The
-# call sites are the install path only: a normal launch must not touch them.
-# Each write is guarded by needs_refresh, so a current install only performs
-# the version check.
+# launcher, so they can be rewritten without reinstalling the sandbox. Run on
+# both the install path and every launch: each write is guarded by
+# needs_refresh, so a current install only performs the version check, and a
+# version bump still reaches users who installed an older release.
 # ============================================================
 
 refresh_generated_artifacts() {
@@ -503,13 +537,9 @@ ACODE_CLI
         chmod +x "$PREFIX/ubuntu/usr/local/bin/acode"
     fi
 
-    log_ok "acode CLI ready"
-
     # --------------------------------------------------------
     # Create initrc
     # --------------------------------------------------------
-
-    log_step "Writing shell configuration..."
 
     if needs_refresh "$PREFIX/ubuntu/initrc"; then
         cat > "$PREFIX/ubuntu/initrc" <<'EOF'
@@ -585,91 +615,6 @@ if [ -s /etc/acode_motd ]; then
 fi
 
 # ============================================================
-# Binary execution warning
-# ============================================================
-
-check_binary_execution() {
-    local cmd="$1"
-    local cmd_path=""
-
-    [[ -z "$cmd" ]] && return
-
-    if [[ "$cmd" == */* ]]; then
-        cmd_path="$(realpath "$cmd" 2>/dev/null)"
-    else
-        cmd_path="$(command -v "$cmd" 2>/dev/null)"
-
-        if [[ -n "$cmd_path" ]]; then
-            cmd_path="$(realpath "$cmd_path" 2>/dev/null)"
-        fi
-    fi
-
-    [[ -z "$cmd_path" ]] && return
-    [[ ! -f "$cmd_path" ]] && return
-
-    if [[ "$cmd_path" == /storage/* ]] ||
-       [[ "$cmd_path" == /sdcard/* ]]; then
-
-        echo -e "\e[1;31m[!] ATTENTION REQUIRED\e[0m
-
-\e[1;31mThe binary is located in:\e[0m
-  \e[36m$cmd_path\e[0m
-
-\e[1;31mBinaries cannot be executed reliably from /sdcard or /storage.\e[0m
-
-These locations are backed by Android's external storage layer
-and do not support normal Linux executable permissions.
-
-Move your project or binary to a directory under:
-
-  \e[1;32m/home/\e[0m
-
-Example:
-
-  \e[1;32mmv myproject ~/myproject\e[0m
-  \e[1;32mcd ~/myproject\e[0m
-
-Then run the binary again.
-" >&2
-    fi
-}
-
-_acode_preexec() {
-    [[ "$BASH_COMMAND" == trap* ]] && return
-
-    local cmd="${BASH_COMMAND%% *}"
-
-    check_binary_execution "$cmd"
-}
-
-# The DEBUG trap forks a subshell per command, so only install it when the
-# external-storage paths it warns about are actually mounted.
-if [ -d /sdcard ] || [ -d /storage ]; then
-    # Preserve an existing DEBUG trap.
-    __acode_existing_debug_trap="$(trap -p DEBUG 2>/dev/null)"
-
-    if [[ -n "$__acode_existing_debug_trap" ]]; then
-        __acode_existing_cmd="$(
-            printf '%s' "$__acode_existing_debug_trap" |
-            sed -E "s/.*'((.*))'.*/\1/"
-        )"
-    else
-        __acode_existing_cmd=""
-    fi
-
-    if [[ "$__acode_existing_cmd" != *"_acode_preexec"* ]]; then
-        if [[ -n "$__acode_existing_cmd" ]]; then
-            trap "$__acode_existing_cmd; _acode_preexec" DEBUG
-        else
-            trap '_acode_preexec' DEBUG
-        fi
-    fi
-
-    unset __acode_existing_debug_trap
-    unset __acode_existing_cmd
-fi
-
-# ============================================================
 # Command-not-found handler
 # ============================================================
 
@@ -706,7 +651,7 @@ alias clear='reset'
 
 ACODE_PS1='\[\033[1;32m\]\u\[\033[0m\]@localhost \[\033[1;34m\]$_PS1_PATH\[\033[0m\] ${_PS1_MARK:-$} '
 
-PROMPT_COMMAND='_PS1_PATH=$(_shorten_path); _PS1_EXIT=$?; if [ "$_PS1_EXIT" -ne 0 ]; then _PS1_MARK="\[\033[31m\]>$\[\033[0m\]"; else _PS1_MARK="$"; fi'
+PROMPT_COMMAND='_PS1_EXIT=$?; _PS1_PATH=$(_shorten_path); if [ "$_PS1_EXIT" -ne 0 ]; then _PS1_MARK="\[\033[31m\]>$\[\033[0m\]"; else _PS1_MARK="$"; fi'
 
 PS1="$ACODE_PS1"
 
@@ -901,12 +846,15 @@ if [ "$FAILSAFE" = true ]; then
 fi
 
 # Runs on every launch too, so existing rootfs installs pick up new GIDs (and
-# any group Android grants later) without reinstalling the sandbox, and so the
-# Node.js jemalloc hook reaches installs made before it existed.
+# any group Android grants later) without reinstalling the sandbox, so the
+# Node.js jemalloc hook reaches installs made before it existed, and so a
+# version bump reaches installs that predate the current generated artifacts.
 register_android_groups
 sync_timezone
 install_node_jemalloc_hook
 run_node_jemalloc_hook
+refresh_generated_artifacts
+write_version_marker
 
 # AXS splits the `-c` string on whitespace and resolves the FIRST token as the
 # program (src/terminal/handlers.rs: cmd.split_whitespace()). A leading `exec`

@@ -7,9 +7,10 @@ import { readLauncher, readShellFunctions } from "../helpers/initLauncher";
 
 /**
  * The rootfs keeps its own copy of initrc, the acode CLI and the MOTD, so they
- * are rewritten on the install path, gated by ACODE_GENERATED_VERSION. A normal
- * launch must leave them alone: it only boots AXS and must not touch rootfs
- * state beyond the group and Node hook passes.
+ * are rewritten on the install path and on every launch, gated by
+ * ACODE_GENERATED_VERSION. The launch pass is what lets a version bump reach
+ * installs that predate the fix, while a current install only pays the version
+ * check.
  */
 
 const HARNESS_ROOT = path.join(os.tmpdir(), "acode-generated-artifacts-test");
@@ -154,7 +155,7 @@ describe("generated rootfs artifacts", () => {
 		);
 	});
 
-	it("does not touch generated artifacts on a normal launch", () => {
+	it("refreshes generated artifacts on a normal launch so version bumps reach existing installs", () => {
 		const source = readLauncher();
 		// The install block exits before this point, so everything from here on
 		// runs for every terminal, not only while installing.
@@ -164,7 +165,9 @@ describe("generated rootfs artifacts", () => {
 
 		const launchPath = source.slice(launchStart);
 
-		expect(launchPath).not.toContain("refresh_generated_artifacts");
-		expect(launchPath).not.toContain("write_version_marker");
+		// --installing only comes from a reinstall that wipes the rootfs, so
+		// without these calls a version bump never reaches an existing install.
+		expect(launchPath).toContain("refresh_generated_artifacts");
+		expect(launchPath).toContain("write_version_marker");
 	});
 });

@@ -29,6 +29,27 @@ export function prepareAptCommand(command: string): string {
 	return `export DEBIAN_FRONTEND=noninteractive\napt-get update || echo "apt-get update failed; continuing with cached package lists" >&2\n${command}`;
 }
 
+/**
+ * NodeSource's nodejs package ships npm and declares `Conflicts: npm`, so
+ * asking apt for both fails once that repository is configured. Install only
+ * nodejs and fall back to Ubuntu's npm package when npm is still missing
+ * (the Ubuntu nodejs fallback on architectures NodeSource does not build).
+ */
+export function buildNpmInstallCommand(options: {
+	npmCommand?: string;
+	global?: boolean;
+	packages: string[];
+}): string {
+	const npmCommand = options.npmCommand?.trim() || "npm";
+	const installFlags = options.global === false ? "install" : "install -g";
+	const packages = options.packages.map((entry) => quoteArg(entry)).join(" ");
+	const ensureNpm = "command -v npm >/dev/null 2>&1 || apt-get install -y npm";
+
+	return prepareAptCommand(
+		`apt-get install -y nodejs && { ${ensureNpm}; } && ${npmCommand} ${installFlags} ${packages}`,
+	);
+}
+
 export function formatCommand(
 	command: string | string[] | null | undefined,
 ): string {

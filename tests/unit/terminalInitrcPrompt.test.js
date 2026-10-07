@@ -70,6 +70,35 @@ const generatedInitrc = () =>
 		.replace(/\/etc\/skel\/\.bashrc/g, "$TEST_ROOT/skel.bashrc")
 		.replace(/\/usr\/share\/base-files\/dot\.bashrc/g, "$TEST_ROOT/skel.bashrc");
 
+// PROMPT_COMMAND runs before each prompt, so the marker for the previous
+// command's exit status can only be observed after that command has run.
+const markerAfter = (name, command) => {
+	const home = path.join(HARNESS_ROOT, name, "home");
+
+	fs.mkdirSync(home, { recursive: true });
+	fs.writeFileSync(path.join(home, ".bashrc"), "");
+
+	const rcFile = path.join(HARNESS_ROOT, name, "initrc");
+	fs.writeFileSync(rcFile, generatedInitrc());
+
+	const output = execFileSync("bash", ["--rcfile", rcFile, "-i"], {
+		encoding: "utf8",
+		input: `${command}\nprintf 'MARK=%s\\n' "$_PS1_MARK"\nexit\n`,
+		env: {
+			PATH: process.env.PATH,
+			TERM: "xterm-256color",
+			TEST_HOME: home,
+			TEST_ROOT: fixtureRoot,
+		},
+		stdio: ["pipe", "pipe", "pipe"],
+	});
+
+	return output
+		.split("\n")
+		.find((line) => line.startsWith("MARK="))
+		.slice("MARK=".length);
+};
+
 // /etc/bash.bashrc ships color for a 256-color TERM.
 const systemBashrc = () => `[[ $- != *i* ]] && return
 case "$TERM" in
@@ -151,5 +180,13 @@ describe("Ubuntu initrc prompt", () => {
 
 		expect(prompt).toContain("@localhost");
 		expect(prompt).toContain("_PS1_PATH");
+	});
+
+	it("shows the red failure marker after a failing command", () => {
+		expect(markerAfter("failed", "false")).toContain("[31m");
+	});
+
+	it("keeps the plain marker after a successful command", () => {
+		expect(markerAfter("succeeded", "true")).toBe("$");
 	});
 });
