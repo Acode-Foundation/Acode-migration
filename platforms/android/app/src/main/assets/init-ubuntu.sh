@@ -329,8 +329,14 @@ configure_nodesource_repo() {
     if needs_refresh "$ACODE_APT_SOURCES"; then
         log_step "Installing the NodeSource signing key..."
 
-        # The key and the lists have to be registered before the update below,
-        # and curl/gnupg are what the rootfs may still be missing.
+        # The bundled rootfs ships empty package lists, so apt cannot install
+        # curl/gnupg until the lists have been fetched once.
+        if ! apt-get update; then
+            log_warn "Could not update package lists - keeping Ubuntu's nodejs"
+            return 0
+        fi
+
+        # curl/gnupg are what the rootfs may still be missing.
         if ! apt-get install -y --no-install-recommends ca-certificates curl gnupg; then
             log_warn "Could not install curl/gnupg - keeping Ubuntu's nodejs"
             return 0

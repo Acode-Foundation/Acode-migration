@@ -115,6 +115,11 @@ describe("nodesource repository setup", () => {
 		expect(calls).toContain(
 			"install -y --no-install-recommends ca-certificates curl gnupg",
 		);
+		// A fresh rootfs has empty package lists, so the prerequisites install
+		// has to follow an update or apt reports "Unable to locate package curl".
+		expect(calls.indexOf("update")).toBeLessThan(
+			calls.indexOf("install -y --no-install-recommends"),
+		);
 		expect(calls).toContain(`-fsSL ${KEY_URL}`);
 		expect(calls).toContain("update");
 		// The sources directory has to be created first: without it this write
