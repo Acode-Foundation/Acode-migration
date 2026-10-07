@@ -6,7 +6,7 @@ import Checkbox from "components/checkbox";
 import Contextmenu from "components/contextmenu";
 import Page from "components/page";
 import searchBar from "components/searchbar";
-import terminalManager from "components/terminal/terminalManager";
+import { loadTerminalManager } from "components/terminal/loader";
 import alert from "dialogs/alert";
 import confirm from "dialogs/confirm";
 import loader from "dialogs/loader";
@@ -23,13 +23,13 @@ import recents from "lib/recents";
 import remoteStorage from "lib/remoteStorage";
 import appSettings from "lib/settings";
 import { deleteSftpProfile, getSftpProfileId } from "lib/sftpProfiles";
-import mimeTypes from "mime-types";
 import mustache from "mustache";
 import filesSettings from "settings/filesSettings";
 import URLParse from "url-parse";
 import copyEntry from "utils/copyEntry";
 import haptic from "utils/haptic";
 import helpers from "utils/helpers";
+import loadMimeTypes from "utils/mimeTypes";
 import Url from "utils/Url";
 import _addMenu from "./add-menu.hbs";
 import _addMenuHome from "./add-menu-home.hbs";
@@ -1408,9 +1408,7 @@ function FileBrowserInclude(mode, info, doesOpenLast = true) {
 					}
 
 					case "ssh_terminal": {
-						const { TerminalManager } = await import(
-							/* webpackChunkName: "terminal" */ "components/terminal"
-						);
+						const TerminalManager = await loadTerminalManager();
 						await TerminalManager.createRemoteTerminal({ url, name });
 						$page.hide();
 						break;
@@ -1443,6 +1441,7 @@ function FileBrowserInclude(mode, info, doesOpenLast = true) {
 								break;
 							}
 
+							const mimeTypes = await loadMimeTypes();
 							const mimeType =
 								mimeTypes.lookup(name) ||
 								mimeTypes.lookup(shareableUri) ||

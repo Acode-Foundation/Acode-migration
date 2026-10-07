@@ -8,6 +8,8 @@ import "styles/overrideAceStyle.scss";
 import "styles/wideScreen.scss";
 // Editor tabs use a shadow root that only links build/main.css.
 import "pages/welcome/welcome.scss";
+// Terminal code loads on demand; keep its styles in main.css as before.
+import "@xterm/xterm/css/xterm.css";
 
 import "lib/polyfill";
 import "cm/supportedModes";
@@ -26,6 +28,7 @@ import {
 } from "cm/modelist";
 import Contextmenu from "components/contextmenu";
 import Sidebar from "components/sidebar";
+import { loadTerminalManager } from "components/terminal/loader";
 import tile from "components/tile";
 import toast from "components/toast";
 import { initIconTooltips } from "components/tooltip";
@@ -74,6 +77,18 @@ import $_fileMenu from "views/file-menu.hbs";
 import $_menu from "views/menu.hbs";
 import auth, { loginEvents } from "./lib/auth";
 
+/**
+ * A billing service that never answers must not keep the app on the splash
+ * screen, so startup stops waiting for the purchase check after this long.
+ */
+const PRO_CHECK_TIMEOUT_MS = 5000;
+
+/**
+ * Settles once the startup purchase check can no longer change Pro status
+ * (or has timed out). Plugins wait for it so they initialize with that value.
+ */
+let proStatusReady = Promise.resolve();
+
 const oldPreventDefault = TouchEvent.prototype.preventDefault;
 const previousVersionCode = Number.parseInt(localStorage.versionCode, 10);
 const logger = new Logger();
@@ -119,8 +134,6 @@ async function ensurePermission(permission) {
 }
 
 async function onDeviceReady() {
-	await initEncodings(); // important to load encodings before anything else
-
 	const isFreePackage = platform.isIOS
 		? __FREE__
 		: /(free)$/.test(BuildInfo.packageName);
@@ -148,6 +161,25 @@ async function onDeviceReady() {
 		}
 	}
 
+	// Start the purchase check first so it runs alongside the rest of startup
+	// instead of blocking it. StoreKit verifies cached entitlements even when
+	// the device is offline, so iOS never trusts the stored flag.
+	config.HAS_PRO =
+		!isFreePackage || (!platform.isIOS && localStorage.acode_pro === "true");
+	const proPurchaseCheck = verifyProPurchase(isFreePackage);
+	// Paid builds are always Pro, so only a free build's check can change it.
+	proStatusReady = isFreePackage ? proPurchaseCheck : Promise.resolve();
+
+	// These native calls are independent, so run them together.
+	const [dataStorage, cacheStorage, installSource, androidSdkInt] =
+		await Promise.all([
+			resolveStorageDir(externalDataDirectory, dataDirectory),
+			resolveStorageDir(externalCacheDirectory, cacheDirectory),
+			getInstallSource(),
+			getAndroidSdkInt(),
+			initEncodings(), // important to load encodings before anything else
+		]);
+
 	window.app = document.body;
 	window.root = tag.get("#root");
 	window.addedFolder = addedFolder;
@@ -157,20 +189,12 @@ async function onDeviceReady() {
 		Bridge.file.applicationDirectory,
 		"bundle",
 	);
-	window.DATA_STORAGE = await resolveStorageDir(
-		externalDataDirectory,
-		dataDirectory,
-	);
-	window.CACHE_STORAGE = await resolveStorageDir(
-		externalCacheDirectory,
-		cacheDirectory,
-	);
+	window.DATA_STORAGE = dataStorage;
+	window.CACHE_STORAGE = cacheStorage;
 
 	window.PLUGIN_DIR = Url.join(DATA_STORAGE, "plugins");
 	window.KEYBINDING_FILE = Url.join(DATA_STORAGE, ".key-bindings.json");
 	window.log = logger.log.bind(logger);
-
-	config.HAS_PRO = !isFreePackage;
 
 	// Capture synchronous errors
 	window.addEventListener("error", (event) => {
@@ -185,14 +209,6 @@ async function onDeviceReady() {
 		);
 	});
 
-	let installSource = INSTALL_SOURCE_PLAY;
-
-	try {
-		installSource = await helpers.promisify(system.getInstaller);
-	} catch (error) {
-		console.error(error);
-	}
-
 	Object.defineProperty(window, "appInstallSource", {
 		get() {
 			return installSource;
@@ -204,43 +220,7 @@ async function onDeviceReady() {
 		enumerable: false,
 	});
 
-	try {
-		await helpers.promisify(iap.startConnection).catch((e) => {
-			window.log("error", "connection error");
-			window.log("error", e);
-		});
-
-		// StoreKit verifies cached entitlements even when the device is offline.
-		if (!platform.isIOS && localStorage.acode_pro === "true") {
-			config.HAS_PRO = true;
-		}
-
-		if (platform.isIOS || navigator.onLine) {
-			const purchases = await helpers.promisify(iap.getPurchases);
-			const isPro = purchases.some(
-				(purchase) =>
-					purchase.purchaseState === iap.PURCHASE_STATE_PURCHASED &&
-					purchase.productIds.includes("acode_pro_new"),
-			);
-			if (isPro) {
-				config.HAS_PRO = true;
-			} else {
-				config.HAS_PRO = !isFreePackage;
-				localStorage.removeItem("acode_pro");
-			}
-		}
-	} catch (error) {
-		window.log("error", "Purchase error");
-		window.log("error", error);
-	}
-
-	try {
-		window.ANDROID_SDK_INT = await new Promise((resolve, reject) =>
-			system.getAndroidVersion(resolve, reject),
-		);
-	} catch (error) {
-		window.ANDROID_SDK_INT = Number.parseInt(device.version);
-	}
+	window.ANDROID_SDK_INT = androidSdkInt;
 	window.DOES_SUPPORT_THEME = (() => {
 		const $testEl = (
 			<div
@@ -370,58 +350,16 @@ async function onDeviceReady() {
 		window.log("error", error);
 		toast(`Error: ${error.message}`);
 	} finally {
-		setTimeout(async () => {
-			document.body.removeAttribute("data-small-msg");
-			app.classList.remove("loading", "splash");
-
-			// load plugins
-			try {
-				await loadPlugins();
-				fileIcons.refreshRenderedIcons();
-				// Ensure at least one sidebar app is active after all plugins are loaded
-				// This handles cases where the stored section was from an uninstalled plugin
-				sidebarApps.ensureActiveApp();
-
-				// Re-emit events for active file after plugins are loaded
-				const { activeFile } = editorManager;
-				for (const file of editorManager.files) {
-					if (file?.type === "editor") {
-						file.setMode();
-					}
-				}
-				editorManager.reapplyActiveFile();
-				if (activeFile?.uri) {
-					if (activeFile.loaded && !activeFile.loading) {
-						editorManager.emit("file-loaded", activeFile);
-					}
-					// Re-emit switch-file event
-					editorManager.emit("switch-file", activeFile);
-				}
-			} catch (error) {
-				window.log("error", "Failed to load plugins!");
-				window.log("error", error);
-				toast("Failed to load plugins!");
-			} finally {
-				void processPendingIntents().catch(intentHandler.onError);
-			}
-			applySettings.afterRender();
-
-			// Check login status before emitting events
-			try {
-				const user = await auth.getLoggedInUser();
-				if (user) {
-					if (Boolean(user.acode_pro)) {
-						config.HAS_PRO = true;
-					}
-					loginEvents.emit();
-				}
-			} catch (error) {
-				console.error("Error checking login status:", error);
-			}
-
-			fetchPromotions();
-			startAd();
-		}, 500);
+		// Only the purchase check can upgrade a non-Pro user, so settle it before
+		// the UI is usable: restoreTheme() resets a paid theme while HAS_PRO is
+		// false.
+		if (!config.HAS_PRO) {
+			await proPurchaseCheck;
+		}
+		// Reveal the app once it has rendered a frame, then load the rest.
+		requestAnimationFrame(() =>
+			requestAnimationFrame(() => void onAppRendered(proPurchaseCheck)),
+		);
 	}
 
 	await promptUpdateCheckConsent();
@@ -515,6 +453,161 @@ async function onDeviceReady() {
 			);
 		})
 		.catch(console.error);
+}
+
+async function getInstallSource() {
+	try {
+		return await helpers.promisify(system.getInstaller);
+	} catch (error) {
+		console.error(error);
+		return INSTALL_SOURCE_PLAY;
+	}
+}
+
+async function getAndroidSdkInt() {
+	try {
+		return await new Promise((resolve, reject) =>
+			system.getAndroidVersion(resolve, reject),
+		);
+	} catch (error) {
+		return Number.parseInt(device.version);
+	}
+}
+
+/**
+ * Confirms Pro status against the store's purchases, waiting at most
+ * PRO_CHECK_TIMEOUT_MS. Only a change made here is applied, so an upgrade
+ * from another source (e.g. a login) is never downgraded. A result that
+ * arrives after the timeout can only upgrade, because startup has already
+ * moved on with the current status.
+ * @param {boolean} isFreePackage
+ */
+async function verifyProPurchase(isFreePackage) {
+	const initialHasPro = config.HAS_PRO;
+	let timedOut = false;
+	const check = findProPurchase().then((isPro) => {
+		if (isPro) {
+			config.HAS_PRO = true;
+			// Lets the next Android launch skip waiting for this check.
+			localStorage.setItem("acode_pro", "true");
+		} else if (
+			isPro === false &&
+			!timedOut &&
+			config.HAS_PRO === initialHasPro
+		) {
+			config.HAS_PRO = !isFreePackage;
+			// A refunded or revoked purchase must not come back offline.
+			localStorage.removeItem("acode_pro");
+		}
+	});
+	await new Promise((resolve) => {
+		const timer = setTimeout(() => {
+			timedOut = true;
+			logger.log(
+				"warn",
+				`Purchase check still pending after ${PRO_CHECK_TIMEOUT_MS}ms`,
+			);
+			resolve();
+		}, PRO_CHECK_TIMEOUT_MS);
+		const settle = (error) => {
+			if (error) console.error(error);
+			clearTimeout(timer);
+			resolve();
+		};
+		check.then(() => settle(), settle);
+	});
+}
+
+/**
+ * @returns {Promise<boolean|null>} whether Pro was purchased, or null when
+ * the store could not tell
+ */
+async function findProPurchase() {
+	try {
+		await helpers.promisify(iap.startConnection).catch((e) => {
+			logger.log("error", "connection error");
+			logger.log("error", e);
+		});
+
+		if (!platform.isIOS && !navigator.onLine) return null;
+
+		const purchases = await helpers.promisify(iap.getPurchases);
+		return purchases.some(
+			(purchase) =>
+				purchase.purchaseState === iap.PURCHASE_STATE_PURCHASED &&
+				purchase.productIds.includes("acode_pro_new"),
+		);
+	} catch (error) {
+		logger.log("error", "Purchase error");
+		logger.log("error", error);
+		return null;
+	}
+}
+
+/**
+ * Hides the splash and loads everything that is not needed for the first
+ * frame: plugins, login state and ads.
+ * @param {Promise<void>} proPurchaseCheck
+ */
+async function onAppRendered(proPurchaseCheck) {
+	document.body.removeAttribute("data-small-msg");
+	app.classList.remove("loading", "splash");
+
+	// load plugins
+	try {
+		// Plugins may use the synchronous terminal APIs, so have them ready.
+		await loadTerminalManager().catch((error) => {
+			console.error("Failed to load terminal module:", error);
+		});
+		await proStatusReady;
+		await loadPlugins();
+		fileIcons.refreshRenderedIcons();
+		// Ensure at least one sidebar app is active after all plugins are loaded
+		// This handles cases where the stored section was from an uninstalled plugin
+		sidebarApps.ensureActiveApp();
+
+		// Re-emit events for active file after plugins are loaded
+		const { activeFile } = editorManager;
+		for (const file of editorManager.files) {
+			if (file?.type === "editor") {
+				file.setMode();
+			}
+		}
+		editorManager.reapplyActiveFile();
+		if (activeFile?.uri) {
+			if (activeFile.loaded && !activeFile.loading) {
+				editorManager.emit("file-loaded", activeFile);
+			}
+			// Re-emit switch-file event
+			editorManager.emit("switch-file", activeFile);
+		}
+	} catch (error) {
+		window.log("error", "Failed to load plugins!");
+		window.log("error", error);
+		toast("Failed to load plugins!");
+	} finally {
+		void processPendingIntents().catch(intentHandler.onError);
+	}
+	applySettings.afterRender();
+
+	// The purchase result must be applied before login can upgrade to Pro.
+	await proPurchaseCheck;
+
+	// Check login status before emitting events
+	try {
+		const user = await auth.getLoggedInUser();
+		if (user) {
+			if (Boolean(user.acode_pro)) {
+				config.HAS_PRO = true;
+			}
+			loginEvents.emit();
+		}
+	} catch (error) {
+		console.error("Error checking login status:", error);
+	}
+
+	fetchPromotions();
+	startAd();
 }
 
 function showSftpMigrationReport({
@@ -794,6 +887,9 @@ async function loadApp() {
 		openWelcomeTab();
 	}
 
+	// Plugins read Pro status while initializing, so let it settle first.
+	await proStatusReady;
+
 	// load theme plugins
 	try {
 		await loadPlugins(true);
@@ -835,8 +931,8 @@ async function loadApp() {
 	acode.exec("save-state");
 	initFileList();
 
-	import(/* webpackChunkName: "terminal" */ "components/terminal").then(
-		({ TerminalManager }) => {
+	loadTerminalManager().then(
+		(TerminalManager) => {
 			TerminalManager.restorePersistedSessions().catch((error) => {
 				console.error("Terminal restoration failed:", error);
 			});
