@@ -11,7 +11,7 @@
 # Bump when a generated artifact below changes so existing installs refresh it.
 # Presence checks alone pin a stale script on disk forever, which would keep a
 # fixed bug alive for every user who installed before the fix shipped.
-ACODE_GENERATED_VERSION="6"
+ACODE_GENERATED_VERSION="7"
 
 
 export PATH="/bin:/sbin:/usr/bin:/usr/sbin:/usr/share/bin:/usr/share/sbin:/usr/local/bin:/usr/local/sbin:/system/bin:/system/xbin:$PREFIX/local/bin"
@@ -653,11 +653,20 @@ alias clear='reset'
 # ~/.bashrc does not, and the user's rc file is sourced last, so the colored
 # Acode prompt is written here and put back below unless the user's own rc
 # file replaced it with a prompt they wrote.
+#
+# _PS1_MARK reaches PS1 through a parameter expansion at prompt time, and bash
+# decodes \[, \] and \033 only in the literal PS1 string - the same sequences
+# coming out of a variable are printed verbatim. The failure marker therefore
+# carries the bytes those sequences stand for: ESC for the color, and \001 and
+# \002, which are what \[ and \] decode to, so readline still measures the
+# prompt as zero-width.
 # ============================================================
 
 ACODE_PS1='\[\033[1;32m\]\u\[\033[0m\]@localhost \[\033[1;34m\]$_PS1_PATH\[\033[0m\] ${_PS1_MARK:-$} '
 
-PROMPT_COMMAND='_PS1_EXIT=$?; _PS1_PATH=$(_shorten_path); if [ "$_PS1_EXIT" -ne 0 ]; then _PS1_MARK="\[\033[31m\]>$\[\033[0m\]"; else _PS1_MARK="$"; fi'
+ACODE_MARK_FAILED="$(printf '\001\033[31m\002>$\001\033[0m\002')"
+
+PROMPT_COMMAND='_PS1_EXIT=$?; _PS1_PATH=$(_shorten_path); if [ "$_PS1_EXIT" -ne 0 ]; then _PS1_MARK="$ACODE_MARK_FAILED"; else _PS1_MARK="$"; fi'
 
 PS1="$ACODE_PS1"
 

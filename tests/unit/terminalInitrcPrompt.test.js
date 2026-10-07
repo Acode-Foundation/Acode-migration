@@ -70,9 +70,7 @@ const generatedInitrc = () =>
 		.replace(/\/etc\/skel\/\.bashrc/g, "$TEST_ROOT/skel.bashrc")
 		.replace(/\/usr\/share\/base-files\/dot\.bashrc/g, "$TEST_ROOT/skel.bashrc");
 
-// PROMPT_COMMAND runs before each prompt, so the marker for the previous
-// command's exit status can only be observed after that command has run.
-const markerAfter = (name, command) => {
+const runInteractive = (name, input) => {
 	const home = path.join(HARNESS_ROOT, name, "home");
 
 	fs.mkdirSync(home, { recursive: true });
@@ -81,9 +79,9 @@ const markerAfter = (name, command) => {
 	const rcFile = path.join(HARNESS_ROOT, name, "initrc");
 	fs.writeFileSync(rcFile, generatedInitrc());
 
-	const output = execFileSync("bash", ["--rcfile", rcFile, "-i"], {
+	return execFileSync("bash", ["--rcfile", rcFile, "-i"], {
 		encoding: "utf8",
-		input: `${command}\nprintf 'MARK=%s\\n' "$_PS1_MARK"\nexit\n`,
+		input,
 		env: {
 			PATH: process.env.PATH,
 			TERM: "xterm-256color",
@@ -91,13 +89,21 @@ const markerAfter = (name, command) => {
 			TEST_ROOT: fixtureRoot,
 		},
 		stdio: ["pipe", "pipe", "pipe"],
-	});
+	}).split("\n");
+};
 
-	return output
-		.split("\n")
+// PROMPT_COMMAND runs before each prompt, so the marker for the previous
+// command's exit status can only be observed after that command has run.
+const markerAfter = (name, command) =>
+	runInteractive(name, `${command}\nprintf 'MARK=%s\\n' "$_PS1_MARK"\nexit\n`)
 		.find((line) => line.startsWith("MARK="))
 		.slice("MARK=".length);
-};
+
+// What the terminal actually receives: the prompt with _PS1_MARK expanded.
+const renderedPromptAfter = (name, command) =>
+	runInteractive(name, `${command}\nprintf 'PROMPT=%s\\n' "\${PS1@P}"\nexit\n`)
+		.find((line) => line.startsWith("PROMPT="))
+		.slice("PROMPT=".length);
 
 // /etc/bash.bashrc ships color for a 256-color TERM.
 const systemBashrc = () => `[[ $- != *i* ]] && return
@@ -183,7 +189,20 @@ describe("Ubuntu initrc prompt", () => {
 	});
 
 	it("shows the red failure marker after a failing command", () => {
-		expect(markerAfter("failed", "false")).toContain("[31m");
+		// \[, \] and \033 are decoded only in the literal PS1 string, so the
+		// marker has to carry \001/\002 and ESC itself or the prompt prints
+		// the escape text verbatim.
+		expect(markerAfter("failed", "false")).toBe(
+			"\x01\x1b[31m\x02>$\x01\x1b[0m\x02",
+		);
+	});
+
+	it("renders the failure marker as color instead of literal escapes", () => {
+		const prompt = renderedPromptAfter("rendered", "false");
+
+		expect(prompt).toContain("\x1b[31m");
+		expect(prompt).not.toContain("\\033");
+		expect(prompt).not.toContain("\\[");
 	});
 
 	it("keeps the plain marker after a successful command", () => {
