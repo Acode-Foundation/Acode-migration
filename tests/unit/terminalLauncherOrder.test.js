@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readLauncher } from "../helpers/initLauncher";
+import { readAsset, SHELL_ASSETS } from "../helpers/initLauncher";
 
 /**
  * Bash registers a function where its definition is executed, so a top-level
@@ -63,7 +63,9 @@ const callsBeforeDefinitions = (source) => {
 };
 
 describe("launcher function ordering", () => {
-	it("defines every function before the top-level code that calls it", () => {
-		expect(callsBeforeDefinitions(readLauncher())).toEqual([]);
-	});
+	for (const asset of SHELL_ASSETS) {
+		it(`defines every function before the top-level code that calls it in ${asset}`, () => {
+			expect(callsBeforeDefinitions(readAsset(asset))).toEqual([]);
+		});
+	}
 });

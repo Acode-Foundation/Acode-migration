@@ -1,11 +1,26 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 
-export const LAUNCHER = "platforms/android/app/src/main/assets/init-ubuntu.sh";
+const ASSET_ROOT = "platforms/android/app/src/main/assets";
 
-// Slicing shell functions on `^}` alone is wrong: the launcher's generated
-// initrc embeds heredocs whose bodies contain braces. Track heredoc delimiters
-// and count braces only outside them.
+/**
+ * Every shell file the app writes to $PREFIX. init-ubuntu.sh sources the
+ * acode-*.sh modules, so the launcher is no longer a single file.
+ */
+export const SHELL_ASSETS = [
+	"init-sandbox.sh",
+	"init-ubuntu.sh",
+	"acode-log.sh",
+	"acode-groups.sh",
+	"acode-timezone.sh",
+	"acode-node.sh",
+	"acode-install.sh",
+	"acode-launch.sh",
+];
+
+// Slicing shell functions on `^}` alone is wrong: a shell file can embed a
+// heredoc whose body contains braces. Track heredoc delimiters and count
+// braces only outside them.
 const EXTRACTOR = `BEGIN { count = split(ENVIRON["ACODE_WANTED"], wanted, " ") }
 function flush(    kept) {
     if (!capturing) return
@@ -45,9 +60,12 @@ END {
     printf "%s\\n", block
 }`;
 
-export const readLauncher = () => fs.readFileSync(LAUNCHER, "utf8");
+export const readAsset = (name) =>
+	fs.readFileSync(`${ASSET_ROOT}/${name}`, "utf8");
 
-export function readShellFunctions(names, source = readLauncher()) {
+export const readShellAssets = () => SHELL_ASSETS.map(readAsset).join("\n");
+
+export function readShellFunctions(names, source = readShellAssets()) {
 	return execFileSync("awk", [EXTRACTOR], {
 		encoding: "utf8",
 		env: { ...process.env, ACODE_WANTED: names.join(" ") },

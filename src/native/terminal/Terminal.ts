@@ -21,8 +21,49 @@ const AXS_FATAL_PATTERNS = [
 	/exec format error/i,
 ];
 
-let initScripts: Promise<{ initUbuntu: string; initSandbox: string }> | null =
-	null;
+/**
+ * Shell assets written to $PREFIX before every launch. init-ubuntu.sh sources
+ * the acode-*.sh modules from the directory it is started in, so all of them
+ * have to land before the sandbox runs.
+ */
+const SHELL_ASSETS = [
+	"init-sandbox.sh",
+	"init-ubuntu.sh",
+	"acode-log.sh",
+	"acode-groups.sh",
+	"acode-timezone.sh",
+	"acode-node.sh",
+	"acode-install.sh",
+	"acode-launch.sh",
+];
+
+/**
+ * Static files the rootfs reads. The launcher used to generate these from shell
+ * heredocs and gate rewrites on ACODE_GENERATED_VERSION; writing them from the
+ * app removes that version plumbing and keeps the content in real files.
+ */
+const ROOTFS_ARTIFACTS = [
+	{ asset: "acode-initrc", target: "initrc", executable: false },
+	{ asset: "acode-cli", target: "usr/local/bin/acode", executable: true },
+	{ asset: "acode-motd", target: "etc/acode_motd", executable: false },
+	{
+		asset: "acode-node-postinstall.sh",
+		target: "usr/local/bin/node-postinstall.sh",
+		executable: true,
+	},
+	{
+		asset: "acode-apt-node-hook",
+		target: "etc/apt/apt.conf.d/99node-hook",
+		executable: false,
+	},
+];
+
+const ASSET_NAMES = [
+	...SHELL_ASSETS,
+	...ROOTFS_ARTIFACTS.map((artifact) => artifact.asset),
+];
+
+let assetCache: Promise<Record<string, string>> | null = null;
 
 /** Files a backup carries next to its rootfs; `isInstalled()` checks all of them. */
 const TERMINAL_STATE_MARKERS = [
@@ -158,7 +199,6 @@ const Terminal = {
 			system.getFilesDir(resolve, reject);
 		});
 		const failsafeArg = failsafe ? "--failsafe" : "";
-		const { initUbuntu, initSandbox } = await this.readInitScripts();
 		await this.migrateLegacyHome();
 		const isFdroid = await Executor.execute("echo $FDROID");
 		if (isFdroid !== "true") {
@@ -167,8 +207,8 @@ const Terminal = {
 				"rm -f $PREFIX/axs && ln -s $NATIVE_DIR/libaxs.so $PREFIX/axs",
 			);
 		}
-		await writeText(`${filesDir}/init-ubuntu.sh`, initUbuntu);
-		await writeText(`${filesDir}/init-sandbox.sh`, initSandbox);
+		await this.writeInitScripts(filesDir);
+		await this.syncRootfsArtifacts(filesDir);
 
 		const env = buildAxsEnv(options);
 
@@ -210,21 +250,39 @@ const Terminal = {
 		return this.startServer(filesDir, env, failsafeArg, logger, errorLogger);
 	},
 	/**
-	 * Reads the packaged init scripts once per app session.
+	 * Writes the launcher and its modules to $PREFIX. init-ubuntu.sh sources
+	 * them from there, so every file has to land before the sandbox starts.
 	 */
-	async readInitScripts() {
-		if (!initScripts) {
-			initScripts = Promise.all([
-				readAsset("init-ubuntu.sh"),
-				readAsset("init-sandbox.sh"),
-			])
-				.then(([initUbuntu, initSandbox]) => ({ initUbuntu, initSandbox }))
-				.catch((error) => {
-					initScripts = null;
-					throw error;
-				});
+	async writeInitScripts(filesDir: string) {
+		const assets = await readAssets();
+		for (const name of SHELL_ASSETS) {
+			await writeText(`${filesDir}/${name}`, assets[name]);
 		}
-		return initScripts;
+	},
+	/**
+	 * Installs the static rootfs files (initrc, acode CLI, MOTD, Node.js hook).
+	 * Written on every launch: the content is a few kilobytes and there is no
+	 * version marker to keep in sync.
+	 */
+	async syncRootfsArtifacts(filesDir: string) {
+		const rootfs = `${filesDir}/ubuntu`;
+		if (!(await fileExists(rootfs))) return;
+
+		const assets = await readAssets();
+		const executables: string[] = [];
+
+		for (const { asset, target, executable } of ROOTFS_ARTIFACTS) {
+			const path = `${rootfs}/${target}`;
+			await ensureDir(path.slice(0, path.lastIndexOf("/")));
+			await writeText(path, assets[asset]);
+			if (executable) executables.push(`"${path}"`);
+		}
+
+		if (executables.length) {
+			// writeText cannot set the mode, and the acode CLI and the dpkg hook
+			// are executed rather than sourced.
+			await Executor.execute(`chmod 755 ${executables.join(" ")}`);
+		}
 	},
 	/**
 	 * Port the running AXS listener last recorded, if any. Survives app reloads
@@ -891,6 +949,26 @@ function createStartDiagnostics() {
 			return lines.join("\n");
 		},
 	};
+}
+
+/**
+ * Reads every asset once per app session. A failed read clears the cache so a
+ * later launch can retry instead of replaying the rejection forever.
+ */
+async function readAssets() {
+	if (!assetCache) {
+		assetCache = (async () => {
+			const assets: Record<string, string> = {};
+			for (const name of ASSET_NAMES) {
+				assets[name] = await readAsset(name);
+			}
+			return assets;
+		})().catch((error) => {
+			assetCache = null;
+			throw error;
+		});
+	}
+	return assetCache;
 }
 
 function readAsset(assetPath: string, callback?: (text: string) => void) {

@@ -17,7 +17,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
  * rather than from the text of the script.
  */
 
-const LAUNCHER = "platforms/android/app/src/main/assets/init-ubuntu.sh";
+const INITRC = "platforms/android/app/src/main/assets/acode-initrc";
 const HARNESS_ROOT = path.join(os.tmpdir(), "acode-initrc-prompt-test");
 
 // What the rootfs installs: /etc/bash.bashrc colors the prompt for a 256-color
@@ -60,8 +60,7 @@ const runPrompt = (name, userBashrc) => {
 
 const generatedInitrc = () =>
 	fs
-		.readFileSync(LAUNCHER, "utf8")
-		.match(/cat > "\$PREFIX\/ubuntu\/initrc" <<'EOF'\n([\s\S]*?)\nEOF\n/)[1]
+		.readFileSync(INITRC, "utf8")
 		// HOME is forced to the device path, and the system rc files belong to
 		// the machine running the tests; all are redirected to the fixtures.
 		.replace('export HOME="/public"', 'export HOME="$TEST_HOME"')

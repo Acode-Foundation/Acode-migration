@@ -1,5 +1,5 @@
-import fs from "node:fs";
 import { describe, expect, it } from "vitest";
+import { readAsset } from "../helpers/initLauncher";
 
 /**
  * AXS (`acodex_server`) does not run its `-c` payload through a shell.
@@ -15,10 +15,8 @@ import { describe, expect, it } from "vitest";
  * That regression shipped in the Ubuntu branch as `-c "exec bash --rcfile ..."`.
  */
 
-const SCRIPTS = [
-	"platforms/android/app/src/main/assets/init-ubuntu.sh",
-	"platforms/android/app/src/main/assets/init-sandbox.sh",
-];
+// The two shell files that hand a command line to AXS.
+const AXS_SCRIPTS = ["init-sandbox.sh", "acode-launch.sh"];
 
 // Builtins/keywords that are not standalone executables, so they can never
 // resolve as `parts[0]` of an AXS command line.
@@ -74,14 +72,9 @@ const toProgramArgs = (cmd) => {
 };
 
 describe("AXS launch commands", () => {
-	for (const script of SCRIPTS) {
+	for (const script of AXS_SCRIPTS) {
 		it(`spawns a real program for every -c payload in ${script}`, () => {
-			const source = fs.readFileSync(
-				new URL(`../../${script}`, import.meta.url),
-				"utf8",
-			);
-
-			const commands = axsCommands(source);
+			const commands = axsCommands(readAsset(script));
 			expect(
 				commands.length,
 				`no axs -c payload found in ${script}`,
@@ -107,15 +100,9 @@ describe("AXS launch commands", () => {
 	}
 
 	it("resolves the Ubuntu interactive shell to bash with the initrc", () => {
-		const source = fs.readFileSync(
-			new URL(
-				"../../platforms/android/app/src/main/assets/init-ubuntu.sh",
-				import.meta.url,
-			),
-			"utf8",
+		const { program, args } = toProgramArgs(
+			axsCommands(readAsset("acode-launch.sh"))[0],
 		);
-
-		const { program, args } = toProgramArgs(axsCommands(source)[0]);
 		expect(program).toBe("bash");
 		expect(args).toContain("--rcfile");
 		expect(args).toContain("/initrc");

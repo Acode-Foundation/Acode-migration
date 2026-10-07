@@ -17,7 +17,6 @@ const HARNESS_ROOT = path.join(os.tmpdir(), "acode-nodesource-test");
 const KEY_URL = "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key";
 
 let repoSetup = "";
-let versionGate = "";
 
 // Every external tool the setup reaches for, recorded and steered by env vars.
 const fakes = {
@@ -57,12 +56,10 @@ const runSetup = ({ name, arch = "arm64", aptStatus = "0", existingSources = "" 
 		fs.writeFileSync(sources, existingSources);
 	}
 
-	const script = `export ACODE_GENERATED_VERSION="4"
-export ACODE_NODE_MAJOR="26.x"
+	const script = `export ACODE_NODE_MAJOR="26.x"
 export ACODE_APT_SOURCES=${sources}
 export ACODE_APT_KEYRING=${keyring}
 export ACODE_APT_PREFERENCES=${preferences}
-export ACODE_VERSION_FILE=${path.join(root, "generated.version")}
 export ACODE_TEST_LOG=${log}
 export ACODE_TEST_ARCH=${arch}
 export ACODE_TEST_APT_STATUS=${aptStatus}
@@ -71,7 +68,6 @@ export ACODE_TEST_KEY_OUT=${path.join(root, "dearmored.gpg")}
 log_step() { :; }
 log_ok() { :; }
 log_warn() { :; }
-${versionGate}
 ${repoSetup}
 configure_nodesource_repo
 `;
@@ -99,7 +95,6 @@ beforeAll(() => {
 	fs.rmSync(HARNESS_ROOT, { recursive: true, force: true });
 
 	repoSetup = readShellFunctions(["configure_nodesource_repo"]);
-	versionGate = readShellFunctions(["is_current_version", "needs_refresh"]);
 
 	expect(repoSetup).toContain("configure_nodesource_repo()");
 });
@@ -159,8 +154,8 @@ describe("nodesource repository setup", () => {
 		expect(sources).toBeNull();
 	});
 
-	it("does not redo the registration when the sources file is current", () => {
-		const current = "# acode-generated-version: 4\nTypes: deb\n";
+	it("does not redo the registration when the source list already exists", () => {
+		const current = "Types: deb\nURIs: https://deb.nodesource.com/node_26.x\n";
 
 		const { calls, sources } = runSetup({
 			name: "current",
