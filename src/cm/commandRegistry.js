@@ -61,10 +61,6 @@ import {
 	openLintPanel,
 	previousDiagnostic,
 } from "@codemirror/lint";
-import {
-	LSPPlugin,
-	formatDocument as lspFormatDocument,
-} from "@codemirror/lsp-client";
 import { Compartment, EditorSelection } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
 import { focusEditorIfEditable } from "cm/editorReadOnly";
@@ -81,24 +77,7 @@ import {
 	keyBindingsConflict,
 	toCodeMirrorKey,
 } from "cm/keyBindingUtils";
-import {
-	renameSymbol as acodeRenameSymbol,
-	clearDiagnosticsEffect,
-	clientManager,
-	jumpToDeclaration as lspJumpToDeclaration,
-	jumpToDefinition as lspJumpToDefinition,
-	jumpToImplementation as lspJumpToImplementation,
-	jumpToTypeDefinition as lspJumpToTypeDefinition,
-	nextSignature as lspNextSignature,
-	prevSignature as lspPrevSignature,
-	showSignatureHelp as lspShowSignatureHelp,
-} from "cm/lsp";
-import {
-	closeReferencesPanel as acodeCloseReferencesPanel,
-	findAllReferences as acodeFindAllReferences,
-	findAllReferencesInTab as acodeFindAllReferencesInTab,
-} from "cm/lsp/references";
-import { showDocumentSymbols } from "components/symbolsPanel";
+import { getLoadedLspClient, getLspPlugin } from "cm/lsp/clientLoader";
 import toast from "components/toast";
 import prompt from "dialogs/prompt";
 import actions from "handlers/quickTools";
@@ -1071,63 +1050,63 @@ function registerLspCommands() {
 		description: "Format document (Language Server)",
 		readOnly: false,
 		requiresView: true,
-		run: runLspCommand(lspFormatDocument),
+		run: runLspCommand("formatDocument"),
 	});
 	addCommand({
 		name: "renameSymbol",
 		description: "Rename symbol (Language Server)",
 		readOnly: false,
 		requiresView: true,
-		run: runLspCommand(acodeRenameSymbol),
+		run: runLspCommand("renameSymbol"),
 	});
 	addCommand({
 		name: "showSignatureHelp",
 		description: "Show signature help",
 		readOnly: true,
 		requiresView: true,
-		run: runLspCommand(lspShowSignatureHelp),
+		run: runLspCommand("showSignatureHelp"),
 	});
 	addCommand({
 		name: "nextSignature",
 		description: "Next signature",
 		readOnly: true,
 		requiresView: true,
-		run: runLspCommand(lspNextSignature, { silentOnMissing: true }),
+		run: runLspCommand("nextSignature", { silentOnMissing: true }),
 	});
 	addCommand({
 		name: "prevSignature",
 		description: "Previous signature",
 		readOnly: true,
 		requiresView: true,
-		run: runLspCommand(lspPrevSignature, { silentOnMissing: true }),
+		run: runLspCommand("prevSignature", { silentOnMissing: true }),
 	});
 	addCommand({
 		name: "jumpToDefinition",
 		description: "Go to definition (Language Server)",
 		readOnly: true,
 		requiresView: true,
-		run: runLspCommand(lspJumpToDefinition),
+		run: runLspCommand("jumpToDefinition"),
 	});
 	addCommand({
 		name: "jumpToDeclaration",
 		description: "Go to declaration (Language Server)",
 		readOnly: true,
 		requiresView: true,
-		run: runLspCommand(lspJumpToDeclaration),
+		run: runLspCommand("jumpToDeclaration"),
 	});
 	addCommand({
 		name: "jumpToTypeDefinition",
 		description: "Go to type definition (Language Server)",
 		readOnly: true,
 		requiresView: true,
-		run: runLspCommand(lspJumpToTypeDefinition),
+		run: runLspCommand("jumpToTypeDefinition"),
 	});
 	addCommand({
 		name: "jumpToImplementation",
 		description: "Go to implementation (Language Server)",
 		readOnly: true,
 		requiresView: true,
-		run: runLspCommand(lspJumpToImplementation),
+		run: runLspCommand("jumpToImplementation"),
 	});
 	addCommand({
 		name: "findReferences",
@@ -1137,12 +1116,11 @@ function registerLspCommands() {
 		async run(view) {
 			const resolvedView = resolveView(view);
 			if (!resolvedView) return false;
-			const plugin = LSPPlugin.get(resolvedView);
-			if (!plugin) {
+			if (!getLspPlugin(resolvedView)) {
 				notifyLspUnavailable();
 				return false;
 			}
-			return acodeFindAllReferences(resolvedView);
+			return getLoadedLspClient().findAllReferences(resolvedView);
 		},
 	});
 	addCommand({
@@ -1151,7 +1129,8 @@ function registerLspCommands() {
 		readOnly: true,
 		requiresView: false,
 		run() {
-			return acodeCloseReferencesPanel();
+			// The panel can only be open once the client has loaded.
+			return getLoadedLspClient()?.closeReferencesPanel() ?? false;
 		},
 	});
 	addCommand({
@@ -1162,12 +1141,11 @@ function registerLspCommands() {
 		async run(view) {
 			const resolvedView = resolveView(view);
 			if (!resolvedView) return false;
-			const plugin = LSPPlugin.get(resolvedView);
-			if (!plugin) {
+			if (!getLspPlugin(resolvedView)) {
 				notifyLspUnavailable();
 				return false;
 			}
-			return acodeFindAllReferencesInTab(resolvedView);
+			return getLoadedLspClient().findAllReferencesInTab(resolvedView);
 		},
 	});
 	addCommand({
@@ -1176,7 +1154,8 @@ function registerLspCommands() {
 		readOnly: true,
 		requiresView: false,
 		async run() {
-			const activeClients = clientManager.getActiveClients();
+			const clientManager = getLoadedLspClient()?.clientManager;
+			const activeClients = clientManager?.getActiveClients() ?? [];
 			if (!activeClients.length) {
 				toast("No LSP servers are currently running");
 				return true;
@@ -1198,7 +1177,8 @@ function registerLspCommands() {
 		readOnly: true,
 		requiresView: false,
 		async run() {
-			const activeClients = clientManager.getActiveClients();
+			const clientManager = getLoadedLspClient()?.clientManager;
+			const activeClients = clientManager?.getActiveClients() ?? [];
 			if (!activeClients.length) {
 				toast("No LSP servers are currently running");
 				return true;
@@ -1219,6 +1199,7 @@ function registerLspCommands() {
 		async run(view) {
 			const resolvedView = resolveView(view);
 			if (!resolvedView) return false;
+			const { showDocumentSymbols } = await import("components/symbolsPanel");
 			return showDocumentSymbols(resolvedView);
 		},
 	});
@@ -1336,18 +1317,18 @@ function notifyLspUnavailable() {
 	toast?.("Language server not available");
 }
 
-function runLspCommand(commandFn, options = {}) {
+function runLspCommand(commandName, options = {}) {
 	return (view) => {
 		const resolvedView = resolveView(view);
 		if (!resolvedView) return false;
-		const plugin = LSPPlugin.get(resolvedView);
-		if (!plugin) {
+		// Without a loaded client no editor has a language server attached.
+		if (!getLspPlugin(resolvedView)) {
 			if (!options?.silentOnMissing) {
 				notifyLspUnavailable();
 			}
 			return false;
 		}
-		const result = commandFn(resolvedView);
+		const result = getLoadedLspClient()[commandName](resolvedView);
 		return result !== false;
 	};
 }

@@ -1,3 +1,5 @@
+// Must run first so developer tools can show logs from the whole startup.
+import "lib/startupLogBuffer";
 // core-js/stable is installed by native.js, which boot.js always loads first.
 import "html-tag-js/dist/polyfill";
 
@@ -68,6 +70,7 @@ import startAd, {
 	BANNER_SUPPRESSION_REASON,
 	setBannerSuppressed,
 } from "lib/startAd";
+import { discardStartupLogs } from "lib/startupLogBuffer";
 import mustache from "mustache";
 import themes from "theme/list";
 import { initHighlighting } from "utils/codeHighlight";
@@ -335,14 +338,8 @@ async function onDeviceReady() {
 		}
 	}
 
-	if (settings.value.developerMode) {
-		try {
-			const devTools = (await import("lib/devTools")).default;
-			await devTools.init(false);
-		} catch (error) {
-			console.error("Failed to initialize developer tools", error);
-		}
-	}
+	// Developer tools start once the editor is visible (see onAppRendered).
+	if (!settings.value.developerMode) discardStartupLogs();
 
 	try {
 		await loadApp();
@@ -555,6 +552,7 @@ async function findProPurchase() {
 async function onAppRendered(proPurchaseCheck) {
 	document.body.removeAttribute("data-small-msg");
 	app.classList.remove("loading", "splash");
+	if (settings.value.developerMode) setTimeout(startDevTools);
 
 	// load plugins
 	startPluginGracePeriod();
@@ -612,6 +610,16 @@ async function onAppRendered(proPurchaseCheck) {
 
 	fetchPromotions();
 	startAd();
+}
+
+async function startDevTools() {
+	try {
+		const devTools = (await import("lib/devTools")).default;
+		await devTools.init(false);
+	} catch (error) {
+		discardStartupLogs();
+		console.error("Failed to initialize developer tools", error);
+	}
 }
 
 function showSftpMigrationReport({

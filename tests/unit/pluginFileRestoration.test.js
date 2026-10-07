@@ -642,6 +642,7 @@ it.each(["cached text", "", undefined])(
 			shouldApplyLanguage: () => false,
 			restoreFileScrollPosition: vi.fn(),
 			scheduleLspForFile: vi.fn(),
+			syncEmmetForFile: vi.fn(),
 		});
 		// Run the actual render functions with a real EditorView; omit the unrelated app shell.
 		vm.runInContext(

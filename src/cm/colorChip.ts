@@ -1,5 +1,5 @@
 import type { LSPClient } from "@codemirror/lsp-client";
-import { LSPPlugin } from "@codemirror/lsp-client";
+import { getAllLspPlugins } from "./lsp/clientLoader";
 import type { Range } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType } from "@codemirror/view";
 import pickColor from "dialogs/color";
@@ -94,7 +94,7 @@ export function isViewEditable(view: EditorView): boolean {
 }
 
 export function hasLspColorProvider(view: EditorView): boolean {
-	return LSPPlugin.getAll(view, "documentColor").some(
+	return getAllLspPlugins(view, "documentColor").some(
 		(lsp) =>
 			lsp.client.connected &&
 			!!lsp.client.serverCapabilities?.colorProvider,

@@ -18,7 +18,7 @@ import {
 	executeCommand as runCommand,
 } from "cm/commandRegistry";
 import { default as lspApi } from "cm/lsp/api";
-import lspClientManager from "cm/lsp/clientManager";
+import { getLoadedLspClient, setLspOptions } from "cm/lsp/clientLoader";
 import { registerLspFormatter } from "cm/lsp/formatter";
 import {
 	addMode,
@@ -252,8 +252,10 @@ class Acode {
 		const lspModule = {
 			...lspApi,
 			clientManager: {
-				setOptions: (options) => lspClientManager.setOptions(options),
-				getActiveClients: () => lspClientManager.getActiveClients(),
+				setOptions: (options) => setLspOptions(options),
+				// No client can be active before the client module has loaded.
+				getActiveClients: () =>
+					getLoadedLspClient()?.clientManager.getActiveClients() ?? [],
 			},
 		};
 
