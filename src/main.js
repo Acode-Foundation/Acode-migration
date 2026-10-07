@@ -1,4 +1,4 @@
-import "core-js/stable";
+// core-js/stable is installed by native.js, which boot.js always loads first.
 import "html-tag-js/dist/polyfill";
 
 import "./main.scss";
