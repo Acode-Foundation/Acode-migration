@@ -34,7 +34,10 @@ import toast from "components/toast";
 import { initIconTooltips } from "components/tooltip";
 import alert from "dialogs/alert";
 import confirm from "dialogs/confirm";
-import intentHandler, { processPendingIntents } from "handlers/intent";
+import intentHandler, {
+	processPendingIntents,
+	startPluginGracePeriod,
+} from "handlers/intent";
 import keyboardHandler, { keydownState } from "handlers/keyboard";
 import quickToolsInit from "handlers/quickToolsInit";
 import windowResize from "handlers/windowResize";
@@ -554,6 +557,7 @@ async function onAppRendered(proPurchaseCheck) {
 	app.classList.remove("loading", "splash");
 
 	// load plugins
+	startPluginGracePeriod();
 	try {
 		// Plugins may use the synchronous terminal APIs, so have them ready.
 		await loadTerminalManager().catch((error) => {

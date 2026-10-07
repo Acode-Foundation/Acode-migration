@@ -13,6 +13,7 @@ import NativeFile from "./File";
 import FileError from "./FileError";
 import FileReader from "./FileReader";
 import FileWriter from "./FileWriter";
+import toInternalURL from "./internalUrl";
 import Metadata from "./Metadata";
 import ProgressEvent from "./ProgressEvent";
 import restorePaths from "./restorePaths";
@@ -20,22 +21,32 @@ import { FileUploadOptions, FileUploadResult, Flags } from "./transferTypes";
 
 const call = bridge("File");
 const fileSystems = new Map<string, FileSystem>();
-export const file = Object.fromEntries(
-	[
-		"applicationDirectory",
-		"applicationStorageDirectory",
-		"dataDirectory",
-		"cacheDirectory",
-		"externalApplicationStorageDirectory",
-		"externalDataDirectory",
-		"externalCacheDirectory",
-		"externalRootDirectory",
-		"tempDirectory",
-		"syncedDataDirectory",
-		"documentsDirectory",
-		"sharedDirectory",
-	].map((name) => [name, null]),
-) as Record<string, string | null>;
+export const file = Object.assign(
+	Object.fromEntries(
+		[
+			"applicationDirectory",
+			"applicationStorageDirectory",
+			"dataDirectory",
+			"cacheDirectory",
+			"externalApplicationStorageDirectory",
+			"externalDataDirectory",
+			"externalCacheDirectory",
+			"externalRootDirectory",
+			"tempDirectory",
+			"syncedDataDirectory",
+			"documentsDirectory",
+			"sharedDirectory",
+		].map((name) => [name, null]),
+	) as Record<string, string | null>,
+	{
+		/**
+		 * The WebView URL of a local path without a native round trip, or null
+		 * when only `resolveLocalFileSystemURL` can tell.
+		 */
+		toInternalURL: (url: string, isDirectory?: boolean) =>
+			toInternalURL(fileSystems, url, isDirectory),
+	},
+);
 
 export default function installFileAPI(
 	expose: (name: string, value: unknown) => void,

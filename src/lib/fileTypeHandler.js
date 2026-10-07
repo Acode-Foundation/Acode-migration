@@ -14,6 +14,8 @@
  * @property {Object} options - Additional options passed during file open
  */
 
+const HANDLED_EXTENSIONS_KEY = "pluginHandledExtensions";
+
 class FileTypeHandlerRegistry {
 	#handlers = new Map();
 
@@ -47,6 +49,19 @@ class FileTypeHandlerRegistry {
 			extensions: normalizedExts,
 			handleFile,
 		});
+		rememberHandledExtensions(normalizedExts);
+	}
+
+	/**
+	 * Whether a plugin has registered a handler for this file name in any
+	 * session, so opening it should wait until plugins have loaded. Extensions
+	 * are never forgotten, which only means waiting as before.
+	 * @param {string} filename
+	 */
+	mayHavePluginHandler(filename) {
+		const extensions = readHandledExtensions();
+		const ext = filename.split(".").pop().toLowerCase();
+		return extensions.includes("*") || extensions.includes(ext);
 	}
 
 	/**
@@ -91,3 +106,26 @@ class FileTypeHandlerRegistry {
 
 export const fileTypeHandler = new FileTypeHandlerRegistry();
 export default fileTypeHandler;
+
+function readHandledExtensions() {
+	try {
+		const extensions = JSON.parse(localStorage.getItem(HANDLED_EXTENSIONS_KEY));
+		return Array.isArray(extensions) ? extensions : [];
+	} catch {
+		return [];
+	}
+}
+
+function rememberHandledExtensions(extensions) {
+	const known = readHandledExtensions();
+	const added = extensions.filter((ext) => !known.includes(ext));
+	if (!added.length) return;
+	try {
+		localStorage.setItem(
+			HANDLED_EXTENSIONS_KEY,
+			JSON.stringify([...known, ...added]),
+		);
+	} catch (error) {
+		console.warn("Unable to remember plugin file handlers", error);
+	}
+}

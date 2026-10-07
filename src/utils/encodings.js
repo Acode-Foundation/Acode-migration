@@ -1,7 +1,22 @@
 import alert from "dialogs/alert";
+import platform from "lib/platform";
 import settings from "lib/settings";
 
 let encodings = {};
+
+/**
+ * Sending text through the native bridge base64-encodes it twice (about 0.8 s
+ * for a 3.7 MB file on a mid-range phone), while the WebView decodes UTF-8 in
+ * milliseconds. Only input the native decoder would treat identically is
+ * handled here: Android keeps a UTF-8 BOM and iOS strips it, and invalid bytes
+ * or lone surrogates still go to native so their replacement/error behaviour
+ * is unchanged.
+ */
+const UTF8 = "UTF-8";
+const LONE_SURROGATE =
+	/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+let utf8Decoder;
+let utf8Encoder;
 
 /**
  * @typedef {Object} Encoding
@@ -181,7 +196,9 @@ export async function decode(buffer, charset) {
 	}
 
 	charset = getEncodingName(charset);
-	const text = await execDecode(buffer, charset);
+	const text =
+		(charset === UTF8 ? decodeUtf8(buffer) : null) ??
+		(await execDecode(buffer, charset));
 
 	if (isJson) {
 		return JSON.parse(text);
@@ -196,8 +213,16 @@ export async function decode(buffer, charset) {
  * @param {string} charset
  * @returns {Promise<ArrayBuffer>}
  */
-export function encode(text, charset) {
+export async function encode(text, charset) {
 	charset = getEncodingName(charset);
+	if (charset === UTF8 && !LONE_SURROGATE.test(text)) {
+		utf8Encoder ??= new TextEncoder();
+		const bytes = utf8Encoder.encode(text);
+		// The bridge sends whole ArrayBuffers, so pass one sized to the text.
+		return bytes.byteLength === bytes.buffer.byteLength
+			? bytes.buffer
+			: bytes.slice().buffer;
+	}
 	return execEncode(text, charset);
 }
 
@@ -315,5 +340,21 @@ function writeCachedEncodings(map) {
 		);
 	} catch (error) {
 		console.warn("Unable to cache available encodings", error);
+	}
+}
+
+/**
+ * @param {ArrayBuffer} buffer
+ * @returns {string|null} null when the bytes are not valid UTF-8
+ */
+function decodeUtf8(buffer) {
+	try {
+		utf8Decoder ??= new TextDecoder(UTF8, {
+			fatal: true,
+			ignoreBOM: !platform.isIOS,
+		});
+		return utf8Decoder.decode(buffer);
+	} catch {
+		return null;
 	}
 }
