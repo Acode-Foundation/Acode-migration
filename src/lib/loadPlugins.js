@@ -1,5 +1,6 @@
 import fsOperation from "../fileSystem";
 import Url from "../utils/Url";
+import fileTypeHandler from "./fileTypeHandler";
 import loadPlugin from "./loadPlugin";
 import settings from "./settings";
 
@@ -112,6 +113,8 @@ export default async function loadPlugins(loadOnlyTheme = false) {
 		});
 
 		await Promise.allSettled(loadPromises);
+		// Every installed plugin has now had the chance to register a handler.
+		if (!loadOnlyTheme) fileTypeHandler.markHandledExtensionsKnown();
 
 		acode[onPluginsLoadCompleteCallback]();
 		return results.filter(Boolean).length;

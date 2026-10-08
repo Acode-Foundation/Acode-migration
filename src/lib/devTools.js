@@ -3,12 +3,14 @@ import loader from "dialogs/loader";
 import helpers from "utils/helpers";
 import Url from "utils/Url";
 import config from "./config";
-import { takeStartupLogs } from "./startupLogBuffer";
+import { discardStartupLogs, takeStartupLogs } from "./startupLogBuffer";
 
 let erudaInstance = null;
 let isInitialized = false;
 /** @type {Promise<void> | null} */
 let initializing = null;
+/** Bumped by destroy() so a pending initialization does not activate Eruda. */
+let generation = 0;
 
 /**
  * Developer tools module for debugging Acode
@@ -37,10 +39,12 @@ const devTools = {
 	 */
 	init(showLoader = false) {
 		if (isInitialized) return Promise.resolve();
-		initializing ??= initEruda(showLoader).finally(() => {
-			initializing = null;
+		if (initializing) return initializing;
+		const pending = initEruda(showLoader, generation).finally(() => {
+			if (initializing === pending) initializing = null;
 		});
-		return initializing;
+		initializing = pending;
+		return pending;
 	},
 
 	/**
@@ -89,6 +93,9 @@ const devTools = {
 	 * Destroy Eruda instance
 	 */
 	destroy() {
+		generation++;
+		initializing = null;
+		discardStartupLogs();
 		if (!isInitialized) return;
 		erudaInstance?.destroy();
 		erudaInstance = null;
@@ -103,7 +110,7 @@ export default devTools;
 /**
  * @param {boolean} showLoader
  */
-async function initEruda(showLoader) {
+async function initEruda(showLoader, initGeneration) {
 	try {
 		const erudaPath = Url.join(DATA_STORAGE, "eruda.js");
 		const fs = fsOperation(erudaPath);
@@ -130,14 +137,21 @@ async function initEruda(showLoader) {
 
 		const internalUri = await helpers.toInternalUri(erudaPath);
 
+		if (initGeneration !== generation) return;
+		const script = document.createElement("script");
 		await new Promise((resolve, reject) => {
-			const script = document.createElement("script");
 			script.src = internalUri;
 			script.id = "eruda-script";
 			script.onload = resolve;
 			script.onerror = reject;
 			document.head.appendChild(script);
 		});
+
+		// Developer mode was turned off while Eruda was loading.
+		if (initGeneration !== generation) {
+			script.remove();
+			return;
+		}
 
 		if (window.eruda) {
 			window.eruda.init({
