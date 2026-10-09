@@ -11,7 +11,9 @@ export interface NativeBridge {
 	addDocumentEventHandler(name: string): Channel;
 	addStickyDocumentEventHandler(name: string): Channel;
 	removeDocumentEventHandler(name: string): void;
-	file?: Record<string, string | null>;
+	file?: Record<string, string | null> & {
+		toInternalURL(url: string, isDirectory?: boolean): string | null;
+	};
 	clipboard?: typeof import("./clipboard").default;
 	http?: typeof import("./http/advanced-http").default;
 	websocket?: typeof import("./websocket").default;

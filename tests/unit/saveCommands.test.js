@@ -6,7 +6,7 @@ function setup(files, capabilities = platform) {
 	const manager = { files, activeFile: files[0], getFile: id => files.find(file => file.id === id) };
 	const toast = vi.fn(), error = vi.fn();
 	const dependencies = Object.fromEntries([
-		"fileSystem", "@codemirror/commands", "cm/editorReadOnly", "components/sidebar", "dialogs/prompt", "handlers/quickTools", "lib/recents", "utils/color/regex", "utils/Url", "./checkFiles", "./config", "./editorFile", "./lazyImports", "./openFile", "./openFolder", "./run", "./saveState", "./settings", "./showFileInfo",
+		"fileSystem", "@codemirror/commands", "cm/editorReadOnly", "components/sidebar", "components/terminal/loader", "dialogs/prompt", "handlers/quickTools", "lib/recents", "utils/color/regex", "utils/Url", "./checkFiles", "./config", "./editorFile", "./lazyImports", "./openFile", "./openFolder", "./runLazily", "./saveState", "./settings", "./showFileInfo",
 	].map(id => [id, {}]));
 	const module = loadSourceModule("src/lib/commands.js", {
 		"./platform": capabilities,

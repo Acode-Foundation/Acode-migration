@@ -2,6 +2,7 @@ import fsOperation from "fileSystem";
 import { selectAll } from "@codemirror/commands";
 import { focusEditorIfEditable } from "cm/editorReadOnly";
 import Sidebar from "components/sidebar";
+import { loadTerminalManager } from "components/terminal/loader";
 import confirm from "dialogs/confirm";
 import prompt from "dialogs/prompt";
 import select from "dialogs/select";
@@ -17,7 +18,7 @@ import { loadFileBrowser } from "./lazyImports";
 import openFile from "./openFile";
 import openFolder from "./openFolder";
 import platform from "./platform";
-import run from "./run";
+import runLazily from "./runLazily";
 import saveState from "./saveState";
 import appSettings from "./settings";
 import showFileInfo from "./showFileInfo";
@@ -288,7 +289,7 @@ const commands = {
 		resolveReferenceFile(referenceFile)?.togglePinned?.();
 	},
 	console() {
-		run(true, "inapp");
+		void runLazily(true, "inapp");
 	},
 	"check-files"() {
 		if (!appSettings.value.checkFiles) return;
@@ -809,9 +810,7 @@ Additional Info:
 	},
 	async "new-terminal"() {
 		try {
-			const { TerminalManager } = await import(
-				/* webpackChunkName: "terminal" */ "components/terminal"
-			);
+			const TerminalManager = await loadTerminalManager();
 			await TerminalManager.createServerTerminal();
 		} catch (error) {
 			console.error("Failed to create terminal:", error);

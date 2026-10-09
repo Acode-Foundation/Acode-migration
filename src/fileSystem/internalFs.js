@@ -95,7 +95,21 @@ const internalFs = {
 	 * @param {string} encoding
 	 * @returns {Promise}
 	 */
-	readFile(filename) {
+	async readFile(filename) {
+		// Skips the native resolve round trip when the WebView URL is known.
+		const internalUrl = globalThis.Bridge?.file?.toInternalURL?.(filename);
+		if (internalUrl) {
+			try {
+				const data = await ajax({
+					url: internalUrl,
+					responseType: "arraybuffer",
+				});
+				return { data };
+			} catch {
+				// Missing files and other failures keep the native path's errors.
+			}
+		}
+
 		return new Promise((resolve, reject) => {
 			reject = setMessage(reject, filename);
 			window.resolveLocalFileSystemURL(

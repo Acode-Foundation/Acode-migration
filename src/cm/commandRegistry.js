@@ -61,10 +61,6 @@ import {
 	openLintPanel,
 	previousDiagnostic,
 } from "@codemirror/lint";
-import {
-	LSPPlugin,
-	formatDocument as lspFormatDocument,
-} from "@codemirror/lsp-client";
 import { Compartment, EditorSelection } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
 import { focusEditorIfEditable } from "cm/editorReadOnly";
@@ -81,24 +77,7 @@ import {
 	keyBindingsConflict,
 	toCodeMirrorKey,
 } from "cm/keyBindingUtils";
-import {
-	renameSymbol as acodeRenameSymbol,
-	clearDiagnosticsEffect,
-	clientManager,
-	jumpToDeclaration as lspJumpToDeclaration,
-	jumpToDefinition as lspJumpToDefinition,
-	jumpToImplementation as lspJumpToImplementation,
-	jumpToTypeDefinition as lspJumpToTypeDefinition,
-	nextSignature as lspNextSignature,
-	prevSignature as lspPrevSignature,
-	showSignatureHelp as lspShowSignatureHelp,
-} from "cm/lsp";
-import {
-	closeReferencesPanel as acodeCloseReferencesPanel,
-	findAllReferences as acodeFindAllReferences,
-	findAllReferencesInTab as acodeFindAllReferencesInTab,
-} from "cm/lsp/references";
-import { showDocumentSymbols } from "components/symbolsPanel";
+import { getLoadedLspClient, getLspPlugin } from "cm/lsp/clientLoader";
 import toast from "components/toast";
 import prompt from "dialogs/prompt";
 import actions from "handlers/quickTools";
@@ -152,6 +131,16 @@ let cachedKeymap = [];
 /** @type {Set<EditorView>} */
 const commandViews = new Set();
 
+/**
+ * Commands are often registered in bursts (a plugin adding several at once),
+ * so the keymap is rebuilt lazily on the next read instead of per command.
+ */
+let keymapDirty = true;
+
+/** @type {Set<EditorView>} views waiting for the updated keymap */
+const pendingKeymapViews = new Set();
+let keymapRefreshScheduled = false;
+
 const CODEMIRROR_COMMAND_ENTRIES = Object.entries(cmCommands).filter(
 	([name, value]) =>
 		typeof value === "function" && CODEMIRROR_COMMAND_NAMES.has(name),
@@ -165,7 +154,6 @@ registerCoreCommands();
 registerLspCommands();
 registerLintCommands();
 registerCommandsFromKeyBindings();
-rebuildKeymap();
 
 function registerCoreCommands() {
 	addCommand({
@@ -1062,63 +1050,63 @@ function registerLspCommands() {
 		description: "Format document (Language Server)",
 		readOnly: false,
 		requiresView: true,
-		run: runLspCommand(lspFormatDocument),
+		run: runLspCommand("formatDocument"),
 	});
 	addCommand({
 		name: "renameSymbol",
 		description: "Rename symbol (Language Server)",
 		readOnly: false,
 		requiresView: true,
-		run: runLspCommand(acodeRenameSymbol),
+		run: runLspCommand("renameSymbol"),
 	});
 	addCommand({
 		name: "showSignatureHelp",
 		description: "Show signature help",
 		readOnly: true,
 		requiresView: true,
-		run: runLspCommand(lspShowSignatureHelp),
+		run: runLspCommand("showSignatureHelp"),
 	});
 	addCommand({
 		name: "nextSignature",
 		description: "Next signature",
 		readOnly: true,
 		requiresView: true,
-		run: runLspCommand(lspNextSignature, { silentOnMissing: true }),
+		run: runLspCommand("nextSignature", { silentOnMissing: true }),
 	});
 	addCommand({
 		name: "prevSignature",
 		description: "Previous signature",
 		readOnly: true,
 		requiresView: true,
-		run: runLspCommand(lspPrevSignature, { silentOnMissing: true }),
+		run: runLspCommand("prevSignature", { silentOnMissing: true }),
 	});
 	addCommand({
 		name: "jumpToDefinition",
 		description: "Go to definition (Language Server)",
 		readOnly: true,
 		requiresView: true,
-		run: runLspCommand(lspJumpToDefinition),
+		run: runLspCommand("jumpToDefinition"),
 	});
 	addCommand({
 		name: "jumpToDeclaration",
 		description: "Go to declaration (Language Server)",
 		readOnly: true,
 		requiresView: true,
-		run: runLspCommand(lspJumpToDeclaration),
+		run: runLspCommand("jumpToDeclaration"),
 	});
 	addCommand({
 		name: "jumpToTypeDefinition",
 		description: "Go to type definition (Language Server)",
 		readOnly: true,
 		requiresView: true,
-		run: runLspCommand(lspJumpToTypeDefinition),
+		run: runLspCommand("jumpToTypeDefinition"),
 	});
 	addCommand({
 		name: "jumpToImplementation",
 		description: "Go to implementation (Language Server)",
 		readOnly: true,
 		requiresView: true,
-		run: runLspCommand(lspJumpToImplementation),
+		run: runLspCommand("jumpToImplementation"),
 	});
 	addCommand({
 		name: "findReferences",
@@ -1128,12 +1116,11 @@ function registerLspCommands() {
 		async run(view) {
 			const resolvedView = resolveView(view);
 			if (!resolvedView) return false;
-			const plugin = LSPPlugin.get(resolvedView);
-			if (!plugin) {
+			if (!getLspPlugin(resolvedView)) {
 				notifyLspUnavailable();
 				return false;
 			}
-			return acodeFindAllReferences(resolvedView);
+			return getLoadedLspClient().findAllReferences(resolvedView);
 		},
 	});
 	addCommand({
@@ -1142,7 +1129,8 @@ function registerLspCommands() {
 		readOnly: true,
 		requiresView: false,
 		run() {
-			return acodeCloseReferencesPanel();
+			// The panel can only be open once the client has loaded.
+			return getLoadedLspClient()?.closeReferencesPanel() ?? false;
 		},
 	});
 	addCommand({
@@ -1153,12 +1141,11 @@ function registerLspCommands() {
 		async run(view) {
 			const resolvedView = resolveView(view);
 			if (!resolvedView) return false;
-			const plugin = LSPPlugin.get(resolvedView);
-			if (!plugin) {
+			if (!getLspPlugin(resolvedView)) {
 				notifyLspUnavailable();
 				return false;
 			}
-			return acodeFindAllReferencesInTab(resolvedView);
+			return getLoadedLspClient().findAllReferencesInTab(resolvedView);
 		},
 	});
 	addCommand({
@@ -1167,7 +1154,8 @@ function registerLspCommands() {
 		readOnly: true,
 		requiresView: false,
 		async run() {
-			const activeClients = clientManager.getActiveClients();
+			const clientManager = getLoadedLspClient()?.clientManager;
+			const activeClients = clientManager?.getActiveClients() ?? [];
 			if (!activeClients.length) {
 				toast("No LSP servers are currently running");
 				return true;
@@ -1189,7 +1177,8 @@ function registerLspCommands() {
 		readOnly: true,
 		requiresView: false,
 		async run() {
-			const activeClients = clientManager.getActiveClients();
+			const clientManager = getLoadedLspClient()?.clientManager;
+			const activeClients = clientManager?.getActiveClients() ?? [];
 			if (!activeClients.length) {
 				toast("No LSP servers are currently running");
 				return true;
@@ -1210,6 +1199,7 @@ function registerLspCommands() {
 		async run(view) {
 			const resolvedView = resolveView(view);
 			if (!resolvedView) return false;
+			const { showDocumentSymbols } = await import("components/symbolsPanel");
 			return showDocumentSymbols(resolvedView);
 		},
 	});
@@ -1327,18 +1317,18 @@ function notifyLspUnavailable() {
 	toast?.("Language server not available");
 }
 
-function runLspCommand(commandFn, options = {}) {
+function runLspCommand(commandName, options = {}) {
 	return (view) => {
 		const resolvedView = resolveView(view);
 		if (!resolvedView) return false;
-		const plugin = LSPPlugin.get(resolvedView);
-		if (!plugin) {
+		// Without a loaded client no editor has a language server attached.
+		if (!getLspPlugin(resolvedView)) {
 			if (!options?.silentOnMissing) {
 				notifyLspUnavailable();
 			}
 			return false;
 		}
-		const result = commandFn(resolvedView);
+		const result = getLoadedLspClient()[commandName](resolvedView);
 		return result !== false;
 	};
 }
@@ -1516,19 +1506,34 @@ function buildResolvedKeyBindingsSnapshot() {
 	);
 }
 
+/**
+ * Resolve a command's effective description and key from the bindings.
+ * @returns {string|null} the key source
+ */
+function syncCommandBinding(command, name) {
+	const bindingInfo = resolveBindingInfo(name);
+	command.description = bindingInfo?.description || command.defaultDescription;
+	command.key =
+		bindingInfo && Object.prototype.hasOwnProperty.call(bindingInfo, "key")
+			? bindingInfo.key
+			: (command.defaultKey ?? null);
+	return command.key;
+}
+
+function invalidateKeymap() {
+	keymapDirty = true;
+}
+
+function ensureKeymap() {
+	if (keymapDirty) rebuildKeymap();
+}
+
 function rebuildKeymap() {
 	cachedResolvedKeyBindings = buildResolvedKeyBindingsSnapshot();
 	const candidates = [];
 	let order = 0;
 	commandMap.forEach((command, name) => {
-		const bindingInfo = resolveBindingInfo(name);
-		command.description =
-			bindingInfo?.description || command.defaultDescription;
-		const keySource =
-			bindingInfo && Object.prototype.hasOwnProperty.call(bindingInfo, "key")
-				? bindingInfo.key
-				: (command.defaultKey ?? null);
-		command.key = keySource;
+		const keySource = syncCommandBinding(command, name);
 		const combos = parseKeyString(keySource);
 		combos.forEach((combo) => {
 			const cmKey = toCodeMirrorKey(combo);
@@ -1553,9 +1558,15 @@ function rebuildKeymap() {
 	const conflicts = [];
 	for (const candidate of candidates) {
 		const canonicalKey = canonicalizeKeyBinding(candidate.key);
-		const claimed = Array.from(claimedKeys.entries()).find(([key]) =>
-			keyBindingsConflict(key, canonicalKey),
-		);
+		// First conflicting claim in insertion order, without copying the map
+		// for every candidate.
+		let claimed = null;
+		for (const entry of claimedKeys) {
+			if (keyBindingsConflict(entry[0], canonicalKey)) {
+				claimed = entry;
+				break;
+			}
+		}
 		if (claimed) {
 			const [claimedKey, owner] = claimed;
 			const appCommandShadowsCodeMirrorDefault =
@@ -1598,6 +1609,7 @@ function rebuildKeymap() {
 	cachedKeyBindingConflicts = conflicts;
 	cachedKeymap = bindings;
 	resolvedKeyBindingsVersion += 1;
+	keymapDirty = false;
 	return bindings;
 }
 
@@ -1645,6 +1657,7 @@ export function executeCommand(name, view, args) {
 }
 
 export function getRegisteredCommands() {
+	ensureKeymap();
 	return Array.from(commandMap.values()).map((command) => ({
 		name: command.name,
 		description: command.description || command.defaultDescription,
@@ -1653,22 +1666,27 @@ export function getRegisteredCommands() {
 }
 
 export function getResolvedKeyBindings() {
+	ensureKeymap();
 	return cachedResolvedKeyBindings;
 }
 
 export function getEffectiveKeyBindings() {
+	ensureKeymap();
 	return cachedEffectiveKeyBindings;
 }
 
 export function getKeyBindingConflicts() {
+	ensureKeymap();
 	return cachedKeyBindingConflicts.map((conflict) => ({ ...conflict }));
 }
 
 export function getResolvedKeyBindingsVersion() {
+	ensureKeymap();
 	return resolvedKeyBindingsVersion;
 }
 
 export function getCommandKeymapExtension() {
+	ensureKeymap();
 	return commandKeymapCompartment.of(keymap.of(cachedKeymap));
 }
 
@@ -1756,9 +1774,11 @@ export function registerExternalCommand(descriptor = {}) {
 	const stored = commandMap.get(name);
 	if (stored) {
 		stored.key = normalized.key ?? stored.key;
+		// The returned command reflects its final binding right away.
+		syncCommandBinding(stored, name);
 	}
 
-	rebuildKeymap();
+	invalidateKeymap();
 	return stored;
 }
 
@@ -1767,13 +1787,34 @@ export function removeExternalCommand(name) {
 	const exists = commandMap.has(name);
 	if (!exists) return false;
 	commandMap.delete(name);
-	rebuildKeymap();
+	invalidateKeymap();
 	return true;
 }
 
+/**
+ * Apply the current keymap to a view. Calls made in the same task are applied
+ * together in a microtask, which always runs before the next key event.
+ */
 export function refreshCommandKeymap(view) {
 	const resolvedView = resolveView(view);
-	applyCommandKeymap(resolvedView);
+	if (!resolvedView) return;
+	pendingKeymapViews.add(resolvedView);
+	if (keymapRefreshScheduled) return;
+	keymapRefreshScheduled = true;
+	Promise.resolve().then(flushKeymapRefresh);
+}
+
+function flushKeymapRefresh() {
+	keymapRefreshScheduled = false;
+	const views = Array.from(pendingKeymapViews);
+	pendingKeymapViews.clear();
+	for (const view of views) {
+		try {
+			applyCommandKeymap(view);
+		} catch (error) {
+			console.error("Failed to apply command keymap", error);
+		}
+	}
 }
 
 function normalizeExternalCommand(descriptor) {
@@ -1829,8 +1870,9 @@ function normalizeExternalKey(bindKey) {
 	return combos.length ? combos.join("|") : null;
 }
 
-function applyCommandKeymap(view, bindings = cachedKeymap) {
+function applyCommandKeymap(view, bindings) {
 	if (!view) return;
+	ensureKeymap();
 	commandViews.add(view);
 	view.dispatch({
 		effects: commandKeymapCompartment.reconfigure(

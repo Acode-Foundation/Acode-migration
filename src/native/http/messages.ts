@@ -47,7 +47,7 @@ export default {
 	MISSING_TEXT_ENCODER_API:
 		'advanced-http: TextEncoder API is not supported in this webview. If you want to use "multipart/form-data" requests, you need to load a polyfill library before loading this plugin.',
 	POST_PROCESSING_FAILED:
-		"advanced-http: an error occured during post processing response:",
+		"advanced-http: an error occurred during post processing response:",
 	TYPE_MISMATCH_DATA:
 		'advanced-http: "data" option is configured to support only following data types:',
 	TYPE_MISMATCH_FILE_PATHS:

@@ -389,7 +389,7 @@ interface NativeBridge {
 		tempDirectory: string;
 		/* iOS: Holds app-specific files that should be synced (e.g. to iCloud). */
 		syncedDataDirectory: string;
-		/* iOS: Files private to the app, but that are meaningful to other applciations (e.g. Office files) */
+		/* iOS: Files private to the app, but that are meaningful to other applications (e.g. Office files) */
 		documentsDirectory: string;
 		/* BlackBerry10: Files globally available to all apps */
 		sharedDirectory: string;
