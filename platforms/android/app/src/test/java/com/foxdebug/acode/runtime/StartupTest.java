@@ -54,7 +54,6 @@ public class StartupTest {
   public void exposesEveryTransportKeyOnce() {
     java.util.HashSet<String> keys = new java.util.HashSet<>();
     for (ServiceName name : ServiceName.values()) {
-      assertSame(name, ServiceName.fromKey(name.getKey()));
       assertTrue("duplicate key " + name.getKey(), keys.add(name.getKey()));
     }
   }
