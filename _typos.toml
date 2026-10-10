@@ -57,6 +57,5 @@ multline = "multline"
 sav = "sav"
 ist = "ist"
 Hel = "Hel"
-
-# Apple `xcrun simctl` device identifier field
+# Apple simulator device identifier
 udid = "udid"
