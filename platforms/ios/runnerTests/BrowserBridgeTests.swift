@@ -23,11 +23,47 @@ final class BrowserBridgeTests: BridgeTestCase {
         let fixture = try HTTPFixture()
         try await fixture.start()
         defer { fixture.stop() }
-        _ = try await webView.callAsyncJavaScript("await new Promise((resolve,reject)=>CustomTabs.open(url,{toolbarColor:'#123456'},resolve,reject));", arguments: ["url": fixture.origin], in: nil, contentWorld: .page)
+        _ = try await webView.callAsyncJavaScript("window.browserEvents=[]; await new Promise((resolve,reject)=>CustomTabs.open(url,{toolbarColor:'#123456',reportLifecycle:true},event=>{browserEvents.push(event.type);resolve();},reject));", arguments: ["url": fixture.origin], in: nil, contentWorld: .page)
         let browser = try XCTUnwrap(controller.presentedViewController as? SFSafariViewController)
         if #unavailable(iOS 26) { XCTAssertEqual(browser.preferredBarTintColor, UIColor(hexString: "#123456")) }
         XCTAssertEqual(browser.dismissButtonStyle, .close)
+        XCTAssertEqual(browser.modalPresentationStyle, .fullScreen)
+        XCTAssertFalse(browser.configuration.barCollapsingEnabled)
+        let redirected = try XCTUnwrap(URL(string: "https://example.test/sign-in?state=a%26b&code=c%2Bd#finish"))
+        let activities = try XCTUnwrap(browser.delegate?.safariViewController?(browser, activityItemsFor: redirected, title: nil))
+        let external = try XCTUnwrap(activities.first as? BrowserActivity)
+        XCTAssertEqual(external.url, redirected)
         XCTAssertEqual(webView.url?.absoluteString, "acode://localhost/")
+        browser.delegate?.safariViewControllerDidFinish?(browser)
+        browser.delegate?.safariViewControllerDidFinish?(browser)
         await withCheckedContinuation { continuation in browser.dismiss(animated: false) { continuation.resume() } }
+        let events = try await webView.callAsyncJavaScript("return window.browserEvents;", arguments: [:], in: nil, contentWorld: .page) as? [String]
+        XCTAssertEqual(events, ["opened", "closed"])
+        _ = try await webView.callAsyncJavaScript("await new Promise((resolve,reject)=>CustomTabs.open(url,{authTabId:'active-auth',reportLifecycle:true},resolve,reject));", arguments: ["url": fixture.origin], in: nil, contentWorld: .page)
+        let reopened = try XCTUnwrap(controller.presentedViewController as? SFSafariViewController)
+        _ = try await webView.callAsyncJavaScript("await new Promise((resolve,reject)=>cordova.exec(resolve,reject,'CustomTabs','close',['old-auth']));", arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertTrue(controller.presentedViewController === reopened)
+        _ = try await webView.callAsyncJavaScript("await new Promise((resolve,reject)=>cordova.exec(resolve,reject,'CustomTabs','close',['active-auth']));", arguments: [:], in: nil, contentWorld: .page)
+        XCTAssertNil(controller.presentedViewController)
+        _ = try await webView.callAsyncJavaScript("await new Promise((resolve,reject)=>CustomTabs.open(url,{},resolve,reject)); await new Promise((resolve,reject)=>cordova.exec(resolve,reject,'CustomTabs','close',['active-auth']));", arguments: ["url": fixture.origin], in: nil, contentWorld: .page)
+        let reading = try XCTUnwrap(controller.presentedViewController as? SFSafariViewController)
+        await withCheckedContinuation { continuation in reading.dismiss(animated: false) { continuation.resume() } }
+    }
+
+    func testBrowserActionsPreserveSignInURLAndOnlyOfferInstalledBrowsers() throws {
+        let url = try XCTUnwrap(URL(string: "https://example.test/path?q=a%26b&state=c%2Bd&redirect_uri=https%3A%2F%2Facode.app%2Fcallback#finish"))
+        let available = BrowserActivity.available(for: url, canOpen: { _ in true })
+        XCTAssertEqual(available.map(\.activityTitle), ["Open in Default Browser", "Open in Chrome", "Open in Firefox"])
+        XCTAssertEqual(available[0].url, url)
+        XCTAssertEqual(available[1].url.absoluteString, url.absoluteString.replacingOccurrences(of: "https://", with: "googlechromes://"))
+        let firefox = try XCTUnwrap(URLComponents(url: available[2].url, resolvingAgainstBaseURL: false))
+        XCTAssertEqual(firefox.queryItems?.first?.value, url.absoluteString)
+        XCTAssertEqual(BrowserActivity.available(for: url, canOpen: { _ in false }).map(\.activityTitle), ["Open in Default Browser"])
+        XCTAssertEqual(BrowserActivity.available(for: url, canOpen: { $0.scheme == "firefox" }).map(\.activityTitle), ["Open in Default Browser", "Open in Firefox"])
+        let http = try XCTUnwrap(URL(string: "http://example.test/path"))
+        XCTAssertEqual(BrowserActivity.available(for: http, canOpen: { _ in true })[1].url.scheme, "googlechrome")
+        XCTAssertTrue(BrowserActivity.available(for: URL(string: "javascript:alert(1)")!, canOpen: { _ in true }).isEmpty)
+        let declared = Bundle.main.object(forInfoDictionaryKey: "LSApplicationQueriesSchemes") as? [String]
+        XCTAssertTrue(["googlechrome", "googlechromes", "firefox"].allSatisfy { declared?.contains($0) == true })
     }
 }
