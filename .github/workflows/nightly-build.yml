@@ -159,7 +159,7 @@ jobs:
           npm ci --no-audit --no-fund
 
       - name: Install Android SDK packages
-        run: sdkmanager 'platforms;android-37' 'build-tools;36.0.0'
+        run: $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager 'platforms;android-37' 'build-tools;36.0.0'
 
       - name: Select paid package
         run: npm pkg set androidPackageId=com.foxdebug.acode
