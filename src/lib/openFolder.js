@@ -55,6 +55,7 @@ const isTerminalAccessiblePath = (url = "") => {
 };
 
 const convertToProotPath = (url = "") => {
+	if (platform.isIOS) return iosGuestPath(url);
 	const { ubuntuRoot, publicDir } = getTerminalPaths();
 	if (isAcodeTerminalPublicSafUri(url)) {
 		try {
