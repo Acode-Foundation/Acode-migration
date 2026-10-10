@@ -36,6 +36,25 @@ const windows = [];
 afterEach(() => { for (const window of windows.splice(0)) window.happyDOM.abort(); });
 
 describe("Acode bridge", () => {
+	test("defers cold and listening intents until startup is visible, then delivers warm intents synchronously", async () => {
+		const { window, pending } = await createBridge();
+		window.document.body.classList.add("loading");
+		const received = [];
+		const receive = intent => received.push(intent.data);
+		window.system.setIntentHandler(receive, () => {});
+		const listener = pending.at(-1);
+		window.system.getIntent(receive, () => {});
+		respond(window, pending.at(-1), { data: "cold" });
+		window.Android.callback({ id: listener.id, status: 1, keep: true, data: { data: "during startup" } });
+		await new Promise(resolve => setTimeout(resolve, 0));
+		expect(received).toEqual([]);
+		window.document.body.classList.remove("loading");
+		await new Promise(resolve => setTimeout(resolve, 0));
+		expect(received).toEqual(["cold", "during startup"]);
+		window.Android.callback({ id: listener.id, status: 1, keep: true, data: { data: "warm" } });
+		expect(received).toEqual(["cold", "during startup", "warm"]);
+	});
+
 	test("initializes the actual vendored modules before device readiness and replays readiness to late listeners", async () => {
 		const { window, pending } = await createBridge();
 		const events = [];

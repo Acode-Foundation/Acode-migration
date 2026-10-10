@@ -1,3 +1,4 @@
+import whenAppVisible from "../utils/whenAppVisible";
 import type { NativeCallback } from "./bridge";
 import bridge from "./bridge";
 import httpStream from "./httpStream";
@@ -301,10 +302,15 @@ const api = {
 		);
 	},
 	setIntentHandler(handler: (intent: Intent) => void, onerror: OnFail) {
-		exec(handler, onerror, "set-intent-handler", []);
+		exec(
+			visibleIntentHandler(handler, onerror),
+			onerror,
+			"set-intent-handler",
+			[],
+		);
 	},
 	getIntent(onSuccess: (intent: Intent) => void, onFail: OnFail) {
-		exec(onSuccess, onFail, "get-intent", []);
+		exec(visibleIntentHandler(onSuccess, onFail), onFail, "get-intent", []);
 	},
 	setInputType(
 		type: string,
@@ -408,3 +414,15 @@ const api = {
 	httpStream,
 };
 export default api;
+
+function visibleIntentHandler(
+	handler: (intent: Intent) => void,
+	onFail: OnFail,
+) {
+	return (intent: Intent) => {
+		if (!document.body.classList.contains("loading")) return handler(intent);
+		void whenAppVisible()
+			.then(() => handler(intent))
+			.catch(onFail);
+	};
+}
