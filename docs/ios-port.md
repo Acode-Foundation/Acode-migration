@@ -15,6 +15,13 @@ The iOS port aims to preserve Acode's editor and public native/plugin APIs.
 Android remains supported. This checklist records unfinished work; a successful build alone does
 not establish feature parity.
 
+`CustomTabs.open` options `authTabId` and `reportLifecycle`, and the native
+`CustomTabs` action `close`, are iOS-only. Android ignores those options and
+rejects `close`. Call `Bridge.exec(success, error, "CustomTabs", "close", [authTabId])`
+to dismiss a matching tab; a stale ID leaves the active tab open. With
+`reportLifecycle: true`, the callback receives `opened` and `closed` events;
+the `lib/customTab` promise resolves on the first event only.
+
 The template runtime stays in `platforms/ios/runner`, with native services under
 `runner/lib`. `Config.xcconfig` is ignored and reserved for local signing settings;
 public icon settings live in `runner.xcodeproj/project.pbxproj`, while version,

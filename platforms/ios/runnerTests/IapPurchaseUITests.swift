@@ -105,7 +105,8 @@ final class IapPurchaseUITests: BridgeTestCase {
 
     private func reloadOffline(_ webView: WKWebView) async throws {
         let scripts = webView.configuration.userContentController
-        let originalScripts = scripts.userScripts
+        // WebKit's bridged array changes when scripts are removed; materialize a snapshot.
+        let originalScripts = scripts.userScripts.map { $0 }
         defer {
             scripts.removeAllUserScripts()
             originalScripts.forEach(scripts.addUserScript)

@@ -1,9 +1,43 @@
 import SafariServices
+import WebKit
 import XCTest
 @testable import runner
 
 @MainActor
 final class BrowserBridgeTests: BridgeTestCase {
+    func testResetSettlesOpenCallbacksDuringPresentation() async throws {
+        let webView = try await appWebView()
+        var responder: UIResponder? = webView
+        while responder != nil, !(responder is WebViewController) { responder = responder?.next }
+        let controller = try XCTUnwrap(responder as? WebViewController)
+        let replies = WKWebView()
+        replies.loadHTMLString("<script>window.replies=[];window.iOS={callback:reply=>replies.push(reply)}</script>", baseURL: nil)
+        for _ in 0..<100 {
+            if (try? await replies.evaluateJavaScript("!!window.iOS")) as? Bool == true { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let service = SafariService(bridge: controller.bridge)
+        defer { service.reset() }
+        for (id, lifecycle) in [false, true].enumerated() {
+            service.exec(action: "open", args: ["https://example.test", ["reportLifecycle": lifecycle]],
+                         callback: Callback(id: id, webView: replies))
+            for _ in 0..<100 {
+                if controller.presentedViewController != nil { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertNotNil(controller.presentedViewController)
+            service.reset()
+            for _ in 0..<100 {
+                if controller.presentedViewController == nil,
+                   (try? await replies.evaluateJavaScript("replies.length")) as? Int == id + 1 { break }
+                try await Task.sleep(for: .milliseconds(20))
+            }
+        }
+        let callbacks = try await replies.evaluateJavaScript("replies") as? [[String: Any]]
+        XCTAssertEqual(callbacks?.compactMap { $0["status"] as? Int }, [9, 9])
+        XCTAssertTrue(callbacks?.allSatisfy { $0["keep"] as? Bool == false } == true)
+    }
+
     func testCustomTabsPresentSafariAndRejectInvalidSchemes() async throws {
         let webView = try await appWebView()
         let invalid = try await webView.callAsyncJavaScript("""

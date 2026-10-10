@@ -8,6 +8,8 @@ export default function customTab(
   options?: {
     showTitle?: boolean;
     toolbarColor?: string;
+    authTabId?: string;
+    reportLifecycle?: boolean;
   },
 ) {
   if (!options) {

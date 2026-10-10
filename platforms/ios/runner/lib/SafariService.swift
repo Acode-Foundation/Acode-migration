@@ -2,6 +2,7 @@ import SafariServices
 
 final class SafariService: BaseService, SFSafariViewControllerDelegate {
     private weak var browser: SFSafariViewController?
+    private var openCallback: Callback?
     private var lifecycleCallback: Callback?
     private var authTabId: String?
 
@@ -9,6 +10,8 @@ final class SafariService: BaseService, SFSafariViewControllerDelegate {
         DispatchQueue.main.async {
             self.browser?.dismiss(animated: false)
             self.browser = nil
+            self.openCallback?.error("Browser presentation was cancelled")
+            self.openCallback = nil
             self.lifecycleCallback?.release()
             self.lifecycleCallback = nil
             self.authTabId = nil
@@ -57,12 +60,16 @@ final class SafariService: BaseService, SFSafariViewControllerDelegate {
             browser.dismissButtonStyle = .close
             if #unavailable(iOS 26), let color = options["toolbarColor"] as? String { browser.preferredBarTintColor = UIColor(hexString: color) }
             self.browser = browser
+            self.openCallback = callback
             self.authTabId = options["authTabId"] as? String
             let reportLifecycle = options["reportLifecycle"] as? Bool == true
-            if reportLifecycle { self.lifecycleCallback = callback }
             presenter.present(browser, animated: true) {
                 guard self.browser === browser else { return }
-                if reportLifecycle { callback.success(["type": "opened"], keep: true) }
+                self.openCallback = nil
+                if reportLifecycle {
+                    self.lifecycleCallback = callback
+                    callback.success(["type": "opened"], keep: true)
+                }
                 else { callback.success() }
             }
         }
@@ -76,6 +83,8 @@ final class SafariService: BaseService, SFSafariViewControllerDelegate {
         guard browser === controller else { return }
         browser = nil
         authTabId = nil
+        openCallback?.error("Browser closed before presentation completed")
+        openCallback = nil
         lifecycleCallback?.success(["type": "closed"])
         lifecycleCallback = nil
     }
