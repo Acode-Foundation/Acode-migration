@@ -7,31 +7,198 @@ import system from "../system";
 import Alpine from "./Alpine";
 import Executor from "./Executor";
 
+const AXS_READY_TIMEOUT = 60000;
+const AXS_OUTPUT_LIMIT = 20;
+const AXS_READY_PATTERN = /listening on/i;
+const AXS_PORT_IN_USE_PATTERN =
+	/port is already in use|eaddrinuse|address already in use/i;
+const AXS_FATAL_PATTERNS = [
+	/failed to spawn/i,
+	/no viable candidates/i,
+	/no such file or directory/i,
+	/permission denied/i,
+	/failed building the runtime/i,
+	/exec format error/i,
+];
+
+/**
+ * Shell assets written to $PREFIX before every launch. init-ubuntu.sh sources
+ * the acode-*.sh modules from the directory it is started in, so all of them
+ * have to land before the sandbox runs.
+ */
+const SHELL_ASSETS = [
+	"init-sandbox.sh",
+	"init-ubuntu.sh",
+	"acode-log.sh",
+	"acode-groups.sh",
+	"acode-timezone.sh",
+	"acode-node.sh",
+	"acode-install.sh",
+	"acode-launch.sh",
+];
+
+/**
+ * Static files the rootfs reads. The launcher used to generate these from shell
+ * heredocs and gate rewrites on ACODE_GENERATED_VERSION; writing them from the
+ * app removes that version plumbing and keeps the content in real files.
+ */
+const ROOTFS_ARTIFACTS = [
+	{ asset: "acode-initrc", target: "initrc", executable: false },
+	{ asset: "acode-cli", target: "usr/local/bin/acode", executable: true },
+	{ asset: "acode-motd", target: "etc/acode_motd", executable: false },
+	{
+		asset: "acode-node-postinstall.sh",
+		target: "usr/local/bin/node-postinstall.sh",
+		executable: true,
+	},
+	{
+		asset: "acode-apt-node-hook",
+		target: "etc/apt/apt.conf.d/99node-hook",
+		executable: false,
+	},
+];
+
+const ASSET_NAMES = [
+	...SHELL_ASSETS,
+	...ROOTFS_ARTIFACTS.map((artifact) => artifact.asset),
+];
+
+let assetCache: Promise<Record<string, string>> | null = null;
+
+/** Files a backup carries next to its rootfs; `isInstalled()` checks all of them. */
+const TERMINAL_STATE_MARKERS = [
+	".downloaded",
+	".extracted",
+	".configured",
+	"axs",
+];
+
+/**
+ * Single source of truth for what a terminal install owns. restore and uninstall
+ * used to carry separate copies that had already drifted apart.
+ */
+const TERMINAL_STATE_PATHS = [
+	"ubuntu",
+	...TERMINAL_STATE_MARKERS,
+	"axs.port",
+	"libtalloc.so.2",
+	"libproot-xed.so",
+	"libproot.so",
+	"libproot32.so",
+];
+
+function terminalStateCommand(action: string, exclude: string[] = []) {
+	const targets = TERMINAL_STATE_PATHS.filter((path) => !exclude.includes(path))
+		.map((path) => `"$PREFIX/${path}"`)
+		.join(" ");
+	if (!targets) return "echo ok";
+	return `set -e\nfor item in ${targets}; do\n    ${action} "$item"\ndone\necho ok`;
+}
+
+function removeTerminalState(exclude: string[] = []) {
+	return terminalStateCommand("rm -rf", exclude);
+}
+
+/**
+ * Promotes a verified staging tree over the live install. The previous tree is
+ * only discarded once the replacement is on disk, and is moved back when that
+ * move fails, so a failed activation can never leave the user without a terminal.
+ */
+async function promoteStagedRootfs(stagingRootfs: string) {
+	const result = await Executor.BackgroundExecutor.execute(
+		`rm -rf "$PREFIX/ubuntu.old"\n` +
+			`if [ -d "$PREFIX/ubuntu" ]; then mv "$PREFIX/ubuntu" "$PREFIX/ubuntu.old" || exit 1; fi\n` +
+			`if ! mv "${stagingRootfs}" "$PREFIX/ubuntu"; then\n` +
+			`    if [ -d "$PREFIX/ubuntu.old" ]; then mv "$PREFIX/ubuntu.old" "$PREFIX/ubuntu"; fi\n` +
+			`    exit 1\n` +
+			`fi\n` +
+			`rm -rf "$PREFIX/ubuntu.old"\n` +
+			`echo ok`,
+	);
+	if (!String(result).trim().endsWith("ok")) {
+		throw new Error(`Failed to activate the extracted filesystem: ${result}`);
+	}
+}
+
+/**
+ * Moves the install markers a backup carries beside its rootfs into the live
+ * install. Without them `isInstalled()` stays false after a restore, so the app
+ * would treat an otherwise complete terminal as missing. The markers are created
+ * when the backup predates one of them: the rootfs was verified usable already.
+ */
+async function promoteStagedState(stagingRoot: string) {
+	const moves = TERMINAL_STATE_MARKERS.map(
+		(marker) =>
+			`if [ -e "${stagingRoot}/${marker}" ]; then rm -rf "$PREFIX/${marker}" && mv "${stagingRoot}/${marker}" "$PREFIX/${marker}" || exit 1; fi`,
+	).join("\n");
+	const result = await Executor.BackgroundExecutor.execute(
+		`${moves}\n` +
+			`mkdir -p "$PREFIX/.downloaded" "$PREFIX/.extracted" "$PREFIX/.configured"\n` +
+			`echo ok`,
+	);
+	if (!String(result).trim().endsWith("ok")) {
+		throw new Error(`Failed to activate the restored install state: ${result}`);
+	}
+}
+
+/**
+ * Removes a staging tree and everything the extractor may have left behind.
+ */
+async function removeStaging(stagingPath: string) {
+	await Executor.BackgroundExecutor.execute(
+		`rm -rf -- "${stagingPath}" && echo ok`,
+	);
+}
+
+/**
+ * A download that failed midway (an error page, a truncated file, a captive
+ * portal) would otherwise extract to an empty rootfs that still passes every
+ * directory-existence check. Verify the extraction produced a usable tree.
+ */
+async function assertUsableRootfs(directory: string) {
+	const required = ["bin/sh", "etc/os-release"];
+	for (const relative of required) {
+		const exists = await new Promise<boolean>((resolve, reject) => {
+			system.fileExists(
+				`${directory}/${relative}`,
+				false,
+				(result) => resolve(Number(result) === 1),
+				reject,
+			);
+		});
+		if (!exists) {
+			throw new Error(
+				`Sandbox filesystem is incomplete: missing ${relative}. The download may have failed; retry the installation.`,
+			);
+		}
+	}
+}
+
 const Terminal = {
 	lastInstallError: "",
+	lastStartError: "",
+	lastStartOutput: "",
 	legacyHomeMigrated: false,
 	/**
 	 * Starts the AXS environment by writing init scripts and executing the sandbox.
 	 * @param {boolean} [installing=false] - Whether AXS is being started during installation.
 	 * @param {Function} [logger=console.log] - Function to log standard output.
 	 * @param {Function} [errorLogger=console.error] - Function to log errors.
-	 * @returns {Promise<boolean>} - Returns true if installation completes with exit code 0, void if not installing
+	 * @param {boolean} [failsafe=false] - Start the sandbox in failsafe mode.
+	 * @param {{port?: number, allowAnyOrigin?: boolean}} [options] - Listener overrides; the AXS origin allowlist stays in force unless `allowAnyOrigin` is true.
+	 * @returns {Promise<boolean>} - True once the listener is ready (or the install exits 0).
 	 */
 	async startAxs(
 		installing = false,
 		logger = console.log,
 		errorLogger = console.error,
 		failsafe = false,
+		options: { port?: number; allowAnyOrigin?: boolean } = {},
 	) {
 		const filesDir = await new Promise<string>((resolve, reject) => {
 			system.getFilesDir(resolve, reject);
 		});
 		const failsafeArg = failsafe ? "--failsafe" : "";
-		const [initAlpine, rmWrapper, initSandbox] = await Promise.all([
-			readAsset("init-alpine.sh"),
-			readAsset("rm-wrapper.sh"),
-			readAsset("init-sandbox.sh"),
-		]);
 		await this.migrateLegacyHome();
 		const isFdroid = await Executor.execute("echo $FDROID");
 		if (isFdroid !== "true") {
@@ -40,16 +207,15 @@ const Terminal = {
 				"rm -f $PREFIX/axs && ln -s $NATIVE_DIR/libaxs.so $PREFIX/axs",
 			);
 		}
-		await writeText(`${filesDir}/init-alpine.sh`, initAlpine);
-		await writeText(`${filesDir}/init-sandbox.sh`, initSandbox);
-		await deleteFile(`${filesDir}/alpine/bin/rm`).catch(() => {});
-		await writeText(`${filesDir}/alpine/bin/rm`, rmWrapper);
-		await setExec(`${filesDir}/alpine/bin/rm`, true);
+		await this.writeInitScripts(filesDir);
+		await this.syncRootfsArtifacts(filesDir);
+
+		const env = buildAxsEnv(options);
+
 		if (installing) {
-			return new Promise((resolve, reject) => {
+			return new Promise<boolean>((resolve) => {
 				let lastError = "";
 				Executor.start("sh", (type, data) => {
-					//console[type === "stderr" ? "error" : "log"](`[AXS] ${data}`);
 					logger(`${type} ${data}`);
 					if (type === "stderr" && data) {
 						lastError = lastError ? `${lastError}\n${data}` : data;
@@ -69,7 +235,7 @@ const Terminal = {
 					.then(async (uuid) => {
 						await Executor.write(
 							uuid,
-							`source ${filesDir}/init-sandbox.sh ${installing ? "--installing" : ""} ${failsafeArg}; exit`,
+							`${env}source ${filesDir}/init-sandbox.sh --installing ${failsafeArg}; exit`,
 						);
 					})
 					.catch((error) => {
@@ -79,29 +245,147 @@ const Terminal = {
 						resolve(false);
 					});
 			});
-		} else {
-			try {
-				const uuid = await Executor.start("sh", (type, data) => {
-					//console[type === "stderr" ? "error" : "log"](`[AXS] ${data}`);
-					logger(`${type} ${data}`);
-				});
-				await Executor.write(
-					uuid,
-					`source ${filesDir}/init-sandbox.sh ${installing ? "--installing" : ""} ${failsafeArg}; exit`,
-				);
-			} catch (error) {
-				const message = `Failed to start AXS: ${formatError(error)}`;
-				errorLogger(message);
-				throw new Error(message);
-			}
+		}
+
+		return this.startServer(filesDir, env, failsafeArg, logger, errorLogger);
+	},
+	/**
+	 * Writes the launcher and its modules to $PREFIX. init-ubuntu.sh sources
+	 * them from there, so every file has to land before the sandbox starts.
+	 */
+	async writeInitScripts(filesDir: string) {
+		const assets = await readAssets();
+		for (const name of SHELL_ASSETS) {
+			await writeText(`${filesDir}/${name}`, assets[name]);
 		}
 	},
 	/**
-	 * Stops the AXS process by forcefully killing it.
+	 * Installs the static rootfs files (initrc, acode CLI, MOTD, Node.js hook).
+	 * Written on every launch: the content is a few kilobytes and there is no
+	 * version marker to keep in sync.
+	 */
+	async syncRootfsArtifacts(filesDir: string) {
+		const rootfs = `${filesDir}/ubuntu`;
+		if (!(await fileExists(rootfs))) return;
+
+		const assets = await readAssets();
+		const executables: string[] = [];
+
+		for (const { asset, target, executable } of ROOTFS_ARTIFACTS) {
+			const path = `${rootfs}/${target}`;
+			await ensureDir(path.slice(0, path.lastIndexOf("/")));
+			await writeText(path, assets[asset]);
+			if (executable) executables.push(`"${path}"`);
+		}
+
+		if (executables.length) {
+			// writeText cannot set the mode, and the acode CLI and the dpkg hook
+			// are executed rather than sourced.
+			await Executor.execute(`chmod 755 ${executables.join(" ")}`);
+		}
+	},
+	/**
+	 * Port the running AXS listener last recorded, if any. Survives app reloads
+	 * because the guest writes it before the listener binds.
+	 */
+	async getPort() {
+		try {
+			const result = await Executor.BackgroundExecutor.execute(
+				'cat "$PREFIX/axs.port" 2>/dev/null',
+			);
+			const port = Number.parseInt(String(result).trim(), 10);
+			return Number.isFinite(port) && port > 0 && port <= 65535 ? port : null;
+		} catch {
+			return null;
+		}
+	},
+	/**
+	 * Starts the interactive AXS listener and resolves once it reports readiness.
+	 */
+	startServer(
+		filesDir: string,
+		env: string,
+		failsafeArg: string,
+		logger: (message: string) => void,
+		errorLogger: (message: string) => void,
+	) {
+		this.lastStartError = "";
+		this.lastStartOutput = "";
+		const diagnostics = createStartDiagnostics();
+
+		return new Promise<boolean>((resolve) => {
+			let settled = false;
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			const finish = (ready: boolean, error = "") => {
+				if (settled) return;
+				settled = true;
+				if (timer) clearTimeout(timer);
+				this.lastStartOutput = diagnostics.tail();
+				this.lastStartError = ready
+					? ""
+					: error || diagnostics.error || this.lastStartOutput;
+				resolve(ready);
+			};
+
+			timer = setTimeout(
+				() =>
+					finish(
+						false,
+						`AXS did not report readiness within ${AXS_READY_TIMEOUT}ms`,
+					),
+				AXS_READY_TIMEOUT,
+			);
+
+			Executor.start("sh", (type, data) => {
+				diagnostics.feed(type, data);
+				if (type === "exit") {
+					finish(
+						false,
+						diagnostics.error ||
+							diagnostics.tail() ||
+							`AXS exited before becoming ready (code ${data})`,
+					);
+					return;
+				}
+				if (type === "stderr") {
+					if (data) errorLogger(data);
+				} else if (data) {
+					logger(data);
+				}
+				if (AXS_READY_PATTERN.test(String(data ?? ""))) {
+					finish(true);
+				} else if (diagnostics.portInUse) {
+					finish(false, diagnostics.error || diagnostics.tail());
+				}
+			})
+				.then(async (uuid) => {
+					await Executor.write(
+						uuid,
+						`${env}source ${filesDir}/init-sandbox.sh ${failsafeArg}; exit`,
+					);
+				})
+				.catch((error) =>
+					finish(false, `Failed to start AXS: ${formatError(error)}`),
+				);
+		});
+	},
+	/**
+	 * Stops every running AXS session. `$PREFIX/pid` only ever holds the most
+	 * recent session, so killing it alone left the other terminal tabs alive.
 	 * @returns {Promise<void>}
 	 */
 	async stopAxs() {
-		await Executor.execute(`kill -KILL $(cat $PREFIX/pid)`);
+		await Executor.execute(
+			`for pidfile in $PREFIX/pid $PREFIX/pid.*; do\n` +
+				`    [ -f "$pidfile" ] || continue\n` +
+				`    pid="$(cat "$pidfile" 2>/dev/null)"\n` +
+				`    case "$pid" in ''|*[!0-9]*) continue ;; esac\n` +
+				`    kill -KILL "$pid" 2>/dev/null\n` +
+				`done\n` +
+				`pkill -KILL -f "$PREFIX/axs" 2>/dev/null\n` +
+				`rm -f $PREFIX/pid $PREFIX/pid.*\n` +
+				`true`,
+		);
 	},
 	/**
 	 * Checks if the AXS process is currently running.
@@ -123,12 +407,18 @@ const Terminal = {
 		});
 		if (!pidExists) return false;
 		const result = await Executor.BackgroundExecutor.execute(
-			`kill -0 $(cat $PREFIX/pid) 2>/dev/null && echo "true" || echo "false"`,
+			`for pidfile in $PREFIX/pid $PREFIX/pid.*; do\n` +
+				`    [ -f "$pidfile" ] || continue\n` +
+				`    pid="$(cat "$pidfile" 2>/dev/null)"\n` +
+				`    case "$pid" in ''|*[!0-9]*) continue ;; esac\n` +
+				`    kill -0 "$pid" 2>/dev/null && { echo "true"; exit 0; }\n` +
+				`done\n` +
+				`echo "false"`,
 		);
-		return String(result).toLowerCase() === "true";
+		return String(result).toLowerCase().includes("true");
 	},
 	/**
-	 * Installs Alpine by downloading binaries and extracting the root filesystem.
+	 * Installs Ubuntu by downloading binaries and extracting the root filesystem.
 	 * Also sets up additional dependencies for F-Droid variant.
 	 * @param {Function} [logger=console.log] - Function to log standard output.
 	 * @param {Function} [errorLogger=console.error] - Function to log errors.
@@ -155,23 +445,14 @@ const Terminal = {
 				"arm64-v8a": {
 					libraryDirectory: "arm64",
 					axsArchitecture: "arm64",
-					alpineDirectory: "aarch64",
-					alpineFilename: "alpine-minirootfs-3.21.0-aarch64.tar.gz",
-					hasLibproot32: true,
 				},
 				"armeabi-v7a": {
 					libraryDirectory: "arm32",
 					axsArchitecture: "armv7",
-					alpineDirectory: "armhf",
-					alpineFilename: "alpine-minirootfs-3.21.0-armhf.tar.gz",
-					hasLibproot32: false,
 				},
 				x86_64: {
 					libraryDirectory: "x64",
 					axsArchitecture: "x86_64",
-					alpineDirectory: "x86_64",
-					alpineFilename: "alpine-minirootfs-3.21.0-x86_64.tar.gz",
-					hasLibproot32: true,
 				},
 			};
 			const architecture = architectures[arch as keyof typeof architectures];
@@ -182,29 +463,12 @@ const Terminal = {
 				const buildUrl = (...parts: string[]) => parts.join("");
 				const strings = {
 					protocol: ["ht", "tps", ":", "//"],
-					rawGithubDomain: ["raw", ".", "github", "usercontent", ".", "com"],
 					githubDomain: ["git", "hub", ".", "com"],
-					alpineDomain: ["dl", "-", "cdn", ".", "alpine", "linux", ".", "org"],
 					acodeFoundation: ["Acode", "-", "Foundation"],
 					acodeRepo: ["A", "code"],
 					bajrangCoder: ["bajrang", "Coder"],
 					acodexServer: ["acodex", "_", "server"],
-					libraries: {
-						proot: ["li", "bp", "root", ".", "so"],
-						proot32: ["li", "bp", "root", "32", ".", "so"],
-						talloc: ["li", "bt", "alloc", ".", "so"],
-						prootXed: ["li", "bp", "root", "-", "xed", ".", "so"],
-					},
 				};
-				const rawGithubBase = buildUrl(
-					...strings.protocol,
-					...strings.rawGithubDomain,
-					"/",
-					...strings.acodeFoundation,
-					"/",
-					...strings.acodeRepo,
-					"/main/src/plugins/proot/libs/",
-				);
 				const githubReleaseBase = buildUrl(
 					...strings.protocol,
 					...strings.githubDomain,
@@ -214,81 +478,41 @@ const Terminal = {
 					...strings.acodexServer,
 					"/releases/latest/download/",
 				);
-				const alpineBase = buildUrl(
-					...strings.protocol,
-					...strings.alpineDomain,
-					"/alpine/v3.21/releases/",
-				);
-				const libraryBaseUrl = buildUrl(
-					rawGithubBase,
-					architecture.libraryDirectory,
-					"/",
-				);
-				const libproot = buildUrl(libraryBaseUrl, ...strings.libraries.proot);
-				const libTalloc = buildUrl(libraryBaseUrl, ...strings.libraries.talloc);
-				const prootUrl = buildUrl(
-					libraryBaseUrl,
-					...strings.libraries.prootXed,
-				);
-				const libproot32 = architecture.hasLibproot32
-					? buildUrl(libraryBaseUrl, ...strings.libraries.proot32)
-					: null;
 				const axsUrl = buildUrl(
 					githubReleaseBase,
 					"axs-pie-android-",
 					architecture.axsArchitecture,
 				);
-				const alpineUrl = buildUrl(
-					alpineBase,
-					architecture.alpineDirectory,
+				const ubuntuUrl = buildUrl(
+					...strings.protocol,
+					...strings.githubDomain,
 					"/",
-					architecture.alpineFilename,
+					...strings.acodeFoundation,
+					"/",
+					...strings.acodeRepo,
+					"/raw/refs/heads/main/src/plugins/proot/assets/",
+					architecture.libraryDirectory,
+					"/ubuntu.rootfs",
 				);
 				logger("⬇️  Downloading sandbox filesystem...");
 				await downloadFile(
-					alpineUrl,
-					file.dataDirectory + "alpine.tar.gz",
+					ubuntuUrl,
+					file.dataDirectory + "ubuntu.tar.gz",
 					"Sandbox filesystem",
 				);
 				logger("⬇️  Downloading axs...");
 				await downloadFile(axsUrl, file.dataDirectory + "axs", "AXS");
-				logger("⬇️  Downloading compatibility layer...");
-				await downloadFile(
-					prootUrl,
-					file.dataDirectory + "libproot-xed.so",
-					"Compatibility layer",
-				);
-				logger("⬇️  Downloading supporting library...");
-				await downloadFile(
-					libTalloc,
-					file.dataDirectory + "libtalloc.so.2",
-					"Supporting library",
-				);
-				if (libproot != null) {
-					await downloadFile(
-						libproot,
-						file.dataDirectory + "libproot.so",
-						"proot loader",
-					);
-				}
-				if (libproot32 != null) {
-					await downloadFile(
-						libproot32,
-						file.dataDirectory + "libproot32.so",
-						"32-bit proot loader",
-					);
-				}
 				logger("✅  All downloads completed");
 			} else {
 				logger("📦  Extracting assets...");
 				await new Promise((resolve, reject) => {
 					system.extractAsset(
-						`alpine_assets/${architecture.libraryDirectory}/alpine.rootfs`,
-						`${filesDir}/alpine.tar.gz`,
+						`${architecture.libraryDirectory}/ubuntu.rootfs`,
+						`${filesDir}/ubuntu.tar.gz`,
 						resolve,
 						(e) => {
 							console.error(
-								`Failed to extract alpine.tar.gz: ${formatError(e)}`,
+								`Failed to extract ubuntu.tar.gz: ${formatError(e)}`,
 							);
 							reject(e);
 						},
@@ -304,21 +528,41 @@ const Terminal = {
 			}
 			logger("📁  Setting up directories...");
 			await ensureDir(`${filesDir}/.downloaded`);
-			const alpineDir = `${filesDir}/alpine`;
-			await ensureDir(alpineDir);
 			logger("📦  Extracting sandbox filesystem...");
-			await Executor.execute(
-				`tar --no-same-owner -xf ${filesDir}/alpine.tar.gz -C ${alpineDir}`,
-			);
+
+			// Extract and verify into a staging tree first: replacing the live
+			// install only after it is known-good keeps a failed extract from
+			// destroying a working terminal. The rootfs archive stores its
+			// contents at the archive root, so the staging directory itself
+			// becomes $PREFIX/ubuntu.
+			const stagingRoot = `${filesDir}/ubuntu.staging`;
+			await removeStaging(stagingRoot);
+			await ensureDir(stagingRoot);
+
+			const rootfsArchive = `${filesDir}/ubuntu.tar.gz`;
+			await new Promise((resolve, reject) => {
+				system.extractTarArchive(
+					rootfsArchive,
+					stagingRoot,
+					resolve,
+					(error) => {
+						reject(
+							new Error(
+								`Failed to extract the sandbox filesystem from ${rootfsArchive}: ${formatError(error)}`,
+							),
+						);
+					},
+				);
+			});
+
+			await assertUsableRootfs(stagingRoot);
+			await promoteStagedRootfs(stagingRoot);
+
 			logger("⚙️  Applying basic configuration...");
 			await writeText(
-				`${alpineDir}/etc/resolv.conf`,
+				`${filesDir}/ubuntu/etc/resolv.conf`,
 				`nameserver 8.8.4.4 \nnameserver 8.8.8.8`,
 			);
-			const rmWrapper = await readAsset("rm-wrapper.sh");
-			await deleteFile(`${alpineDir}/bin/rm`).catch(() => {});
-			await writeText(`${alpineDir}/bin/rm`, rmWrapper);
-			await setExec(`${alpineDir}/bin/rm`, true);
 			logger("✅  Extraction complete");
 			await ensureDir(`${filesDir}/.extracted`);
 			logger("⚙️  Updating sandbox environment...");
@@ -338,7 +582,7 @@ const Terminal = {
 		}
 	},
 	/**
-	 * Checks if alpine is already installed.
+	 * Checks if ubuntu is already installed.
 	 * @returns {Promise<boolean>} - Returns true if all required files and directories exist.
 	 */
 	isInstalled() {
@@ -346,9 +590,9 @@ const Terminal = {
 			const filesDir = await new Promise<string>((resolve, reject) => {
 				system.getFilesDir(resolve, reject);
 			});
-			const alpineExists = await new Promise((resolve, reject) => {
+			const ubuntuExists = await new Promise((resolve, reject) => {
 				system.fileExists(
-					`${filesDir}/alpine`,
+					`${filesDir}/ubuntu`,
 					false,
 					(result) => {
 						resolve(Number(result) === 1);
@@ -357,7 +601,7 @@ const Terminal = {
 				);
 			});
 			const downloaded =
-				alpineExists &&
+				ubuntuExists &&
 				(await new Promise((resolve, reject) => {
 					system.fileExists(
 						`${filesDir}/.downloaded`,
@@ -369,7 +613,7 @@ const Terminal = {
 					);
 				}));
 			const extracted =
-				alpineExists &&
+				ubuntuExists &&
 				(await new Promise((resolve, reject) => {
 					system.fileExists(
 						`${filesDir}/.extracted`,
@@ -381,7 +625,7 @@ const Terminal = {
 					);
 				}));
 			const configured =
-				alpineExists &&
+				ubuntuExists &&
 				(await new Promise((resolve, reject) => {
 					system.fileExists(
 						`${filesDir}/.configured`,
@@ -392,7 +636,7 @@ const Terminal = {
 						reject,
 					);
 				}));
-			resolve(alpineExists && downloaded && extracted && configured);
+			resolve(ubuntuExists && downloaded && extracted && configured);
 		});
 	},
 	/**
@@ -407,12 +651,12 @@ const Terminal = {
 		});
 	},
 	/**
-	 * Creates a backup of the Alpine Linux installation
+	 * Creates a backup of the Ubuntu Linux installation
 	 * @async
 	 * @function backup
-	 * @description Creates a compressed tar archive of the Alpine installation
+	 * @description Creates a tar archive of the Ubuntu installation
 	 * @returns {Promise<string>} Promise that resolves to the file URI of the created backup file (aterm_backup.tar)
-	 * @throws {string} Rejects with "Alpine is not installed." if Alpine is not currently installed
+	 * @throws {string} Rejects with "Ubuntu is not installed." if Ubuntu is not currently installed
 	 * @throws {string} Rejects with command output if backup creation fails
 	 * @example
 	 * try {
@@ -425,16 +669,13 @@ const Terminal = {
 	backup() {
 		return new Promise(async (resolve, reject) => {
 			if (!(await this.isInstalled())) {
-				reject("Alpine is not installed.");
+				reject("Ubuntu is not installed.");
 				return;
 			}
 			const cmd = `
             set -e
-            INCLUDE_FILES="alpine .downloaded .extracted .configured axs"
-            if [ "$FDROID" = "true" ]; then
-                INCLUDE_FILES="$INCLUDE_FILES libtalloc.so.2 libproot-xed.so"
-            fi
-            EXCLUDE="--exclude=alpine/data --exclude=alpine/system --exclude=alpine/vendor --exclude=alpine/sdcard --exclude=alpine/storage --exclude=alpine/public --exclude=alpine/apex --exclude=alpine/odm --exclude=alpine/product --exclude=alpine/system_ext --exclude=alpine/linkerconfig --exclude=alpine/proc --exclude=alpine/sys --exclude=alpine/dev --exclude=alpine/run --exclude=alpine/tmp"
+            INCLUDE_FILES="ubuntu .downloaded .extracted .configured axs"
+            EXCLUDE="--exclude=ubuntu/data --exclude=ubuntu/system --exclude=ubuntu/vendor --exclude=ubuntu/sdcard --exclude=ubuntu/storage --exclude=ubuntu/public --exclude=ubuntu/apex --exclude=ubuntu/odm --exclude=ubuntu/product --exclude=ubuntu/system_ext --exclude=ubuntu/linkerconfig --exclude=ubuntu/proc --exclude=ubuntu/sys --exclude=ubuntu/dev --exclude=ubuntu/run --exclude=ubuntu/tmp"
             tar -cf "$PREFIX/aterm_backup.tar" -C "$PREFIX" $EXCLUDE $INCLUDE_FILES
             echo "ok"
             `;
@@ -447,65 +688,153 @@ const Terminal = {
 		});
 	},
 	/**
-	 * Restores Alpine Linux installation from a backup file
+	 * Checks whether a terminal backup archive is available to restore.
+	 * @returns {Promise<boolean>} - `true` if aterm_backup.tar exists.
+	 */
+	async isBackup() {
+		const filesDir = await new Promise<string>((resolve, reject) => {
+			system.getFilesDir(resolve, reject);
+		});
+		return fileExists(`${filesDir}/aterm_backup.tar`);
+	},
+	/**
+	 * Detects which terminal layout a backup archive contains.
+	 * Archives created by the older Alpine-based terminal contain only `alpine/`
+	 * and cannot be used by the Ubuntu launcher.
+	 * @param {string} backupPath - Absolute path to the backup archive.
+	 * @returns {Promise<"ubuntu"|"legacy-alpine"|"unknown">} - Detected layout.
+	 */
+	async detectBackupLayout(backupPath: string) {
+		const listing = await Executor.BackgroundExecutor.execute(
+			`tar -tf '${backupPath}' 2>/dev/null | head -n 500 || true`,
+		);
+
+		let hasUbuntu = false;
+		let hasAlpine = false;
+
+		for (const rawEntry of String(listing).split("\n")) {
+			const entry = rawEntry.trim().replace(/^\.\//, "");
+			if (!entry) continue;
+
+			const topLevel = entry.split("/")[0];
+			if (topLevel === "ubuntu") hasUbuntu = true;
+			else if (topLevel === "alpine") hasAlpine = true;
+		}
+
+		if (hasUbuntu) return "ubuntu";
+		if (hasAlpine) return "legacy-alpine";
+		return "unknown";
+	},
+	/**
+	 * Restores Ubuntu Linux installation from a backup file
 	 * @async
 	 * @function restore
-	 * @description Restores the Alpine installation from a previously created backup file (aterm_backup.tar).
-	 * This function stops any running Alpine processes, removes existing installation files, and extracts
-	 * the backup to restore the previous state. The backup file must exist in the expected location.
+	 * @description Restores the Ubuntu installation from a previously created backup file (aterm_backup.tar).
+	 * Archives created by the older Alpine-based terminal are rejected instead of being extracted
+	 * into an installation the current launcher cannot use. For compatible archives this function
+	 * stops any running Ubuntu processes, removes existing installation files, and extracts the
+	 * backup to restore the previous state. The backup file must exist in the expected location.
 	 * @returns {Promise<string>} Promise that resolves to "ok" when restoration completes successfully
-	 * @throws {string} Rejects with "Backup File does not exist" if aterm_backup.tar is not found
-	 * @throws {string} Rejects with command output if restoration fails
+	 * @throws {Error} Rejects with "Backup File does not exist" if aterm_backup.tar is not found
+	 * @throws {Error} Rejects when the archive is a legacy Alpine backup or is not a valid Ubuntu backup
+	 * @throws {Error} Rejects with command output if restoration fails
 	 * @example
 	 * try {
 	 *   await restore();
-	 *   console.log("Alpine installation restored successfully");
+	 *   console.log("Ubuntu installation restored successfully");
 	 * } catch (error) {
 	 *   console.error(`Restore failed: ${error}`);
 	 * }
 	 */
-	restore() {
-		return new Promise(async (resolve, reject) => {
-			if (await this.isAxsRunning()) {
-				await this.stopAxs();
-			}
-			const cmd = `
-            set -e
+	async restore() {
+		if (!(await this.isBackup())) {
+			throw new Error("Backup File does not exist");
+		}
 
-            INCLUDE_FILES="$PREFIX/alpine $PREFIX/.downloaded $PREFIX/.extracted $PREFIX/.configured $PREFIX/axs"
-
-            if [ "$FDROID" = "true" ]; then
-                INCLUDE_FILES="$INCLUDE_FILES $PREFIX/libtalloc.so.2 $PREFIX/libproot-xed.so"
-            fi
-
-            for item in $INCLUDE_FILES; do
-                rm -rf -- "$item"
-            done
-
-            tar -xf $PREFIX/aterm_backup.* -C "$PREFIX"
-            echo "ok"
-            `;
-			const result = await Executor.BackgroundExecutor.execute(cmd);
-			if (result === "ok") {
-				resolve(result);
-			} else {
-				reject(result);
-			}
+		const filesDir = await new Promise<string>((resolve, reject) => {
+			system.getFilesDir(resolve, reject);
 		});
+
+		const backupPath = `${filesDir}/aterm_backup.tar`;
+		const layout = await this.detectBackupLayout(backupPath);
+
+		if (layout === "legacy-alpine") {
+			throw new Error(
+				"This backup was created by the older Alpine-based terminal and cannot be restored on Ubuntu. Install the Ubuntu terminal and create a new backup.",
+			);
+		}
+
+		if (layout !== "ubuntu") {
+			throw new Error(
+				"The selected file is not a valid Acode terminal backup.",
+			);
+		}
+
+		if (await this.isAxsRunning()) {
+			await this.stopAxs();
+		}
+
+		// Extract into staging and only then replace the live install. The old
+		// code deleted the working rootfs before touching the archive, so a
+		// truncated backup left the user with no terminal at all.
+		const stagingRoot = `${filesDir}/ubuntu.staging`;
+		await removeStaging(stagingRoot);
+		await ensureDir(stagingRoot);
+
+		try {
+			await new Promise((resolve, reject) => {
+				system.extractTarArchive(backupPath, stagingRoot, resolve, (error) => {
+					reject(
+						new Error(
+							`Failed to extract backup ${backupPath}: ${formatError(error)}`,
+						),
+					);
+				});
+			});
+
+			// A backup stores the tree under an `ubuntu/` prefix, unlike the
+			// rootfs asset which stores its contents at the archive root.
+			const stagedRootfs = `${stagingRoot}/ubuntu`;
+			await assertUsableRootfs(stagedRootfs);
+
+			// Swap the verified tree in first: the previous rootfs survives as
+			// $PREFIX/ubuntu.old until the move succeeds. The backup's install
+			// markers are promoted next, because they are what isInstalled()
+			// checks; only legacy libraries and the stale port file are cleared.
+			await promoteStagedRootfs(stagedRootfs);
+			await promoteStagedState(stagingRoot);
+			await Executor.BackgroundExecutor.execute(
+				removeTerminalState(["ubuntu", ...TERMINAL_STATE_MARKERS]),
+			);
+		} catch (error) {
+			await removeStaging(stagingRoot);
+			throw new Error(formatError(error));
+		}
+
+		await removeStaging(stagingRoot);
+
+		// Never report success unless the restored files form a usable Ubuntu install.
+		if (!(await this.isInstalled())) {
+			throw new Error(
+				"The backup was extracted but the Ubuntu terminal installation is incomplete. Install the terminal again.",
+			);
+		}
+
+		return "ok";
 	},
 	/**
-	 * Uninstalls the Alpine Linux installation
+	 * Uninstalls the Ubuntu Linux installation
 	 * @async
 	 * @function uninstall
-	 * @description Completely removes the Alpine Linux installation from the device by deleting all
-	 * Alpine-related files and directories. This function stops any running Alpine processes before
+	 * @description Completely removes the Ubuntu Linux installation from the device by deleting all
+	 * Ubuntu-related files and directories. This function stops any running Ubuntu processes before
 	 * removal. NOTE: This does not perform cleanup of $PREFIX
 	 * @returns {Promise<string>} Promise that resolves to "ok" when uninstallation completes successfully
 	 * @throws {string} Rejects with command output if uninstallation fails
 	 * @example
 	 * try {
 	 *   await uninstall();
-	 *   console.log("Alpine installation removed successfully");
+	 *   console.log("Ubuntu installation removed successfully");
 	 * } catch (error) {
 	 *   console.error(`Uninstall failed: ${error}`);
 	 * }
@@ -515,23 +844,9 @@ const Terminal = {
 			if (await this.isAxsRunning()) {
 				await this.stopAxs();
 			}
-			const cmd = `
-            set -e
-
-            INCLUDE_FILES="$PREFIX/alpine $PREFIX/.downloaded $PREFIX/.extracted $PREFIX/.configured $PREFIX/axs"
-
-            if [ "$FDROID" = "true" ]; then
-                INCLUDE_FILES="$INCLUDE_FILES $PREFIX/libtalloc.so.2 $PREFIX/libproot-xed.so"
-            fi
-
-            for item in $INCLUDE_FILES; do
-                rm -rf -- "$item"
-            done
-
-            echo "ok"
-            `;
+			const cmd = `${removeTerminalState()}\nrm -rf -- "$PREFIX/ubuntu.staging" "$PREFIX/ubuntu.old"`;
 			const result = await Executor.BackgroundExecutor.execute(cmd);
-			if (result === "ok") {
+			if (String(result).includes("ok")) {
 				resolve(result);
 			} else {
 				reject(result);
@@ -556,30 +871,20 @@ const Terminal = {
                 # Already migrated
                 [ -e "$MIGRATE/.migrated" ] && exit 0
 
-                COPIED=false
-
                 if [ -d "$PREFIX/alpine/home" ] && [ -n "$(find "$PREFIX/alpine/home" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]; then
                     mkdir -p "$MIGRATE/home"
-                    if cp -a "$PREFIX/alpine/home/." "$MIGRATE/home/"; then
-                        COPIED=true
-                    else
-                        exit 1
-                    fi
+                    cp -a "$PREFIX/alpine/home/." "$MIGRATE/home/" || exit 1
                 fi
 
                 if [ -d "$PREFIX/alpine/root" ] && [ -n "$(find "$PREFIX/alpine/root" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]; then
                     mkdir -p "$MIGRATE/root"
-                    if cp -a "$PREFIX/alpine/root/." "$MIGRATE/root/"; then
-                        COPIED=true
-                    else
-                        exit 1
-                    fi
+                    cp -a "$PREFIX/alpine/root/." "$MIGRATE/root/" || exit 1
                 fi
 
-                # Mark as migrated so this only runs once
-                if [ "$COPIED" = "true" ]; then
-                    touch "$MIGRATE/.migrated"
-                fi
+                # Written even when nothing needed copying, otherwise the scan
+                # repeats on every launch for users with no legacy home.
+                mkdir -p "$MIGRATE"
+                touch "$MIGRATE/.migrated"
             `;
 			await Executor.BackgroundExecutor.execute(cmd);
 			this.legacyHomeMigrated = true;
@@ -592,6 +897,80 @@ const Terminal = {
 	},
 	formatError,
 };
+function buildAxsEnv(options: {
+	port?: number;
+	allowAnyOrigin?: boolean;
+}): string {
+	const assignments: string[] = [];
+	const port = Number(options?.port);
+	if (Number.isFinite(port) && port > 0 && port <= 65535) {
+		assignments.push(`AXS_PORT=${Math.floor(port)}`);
+	}
+	if (options?.allowAnyOrigin === true) {
+		assignments.push("AXS_ALLOW_ANY_ORIGIN=1");
+	}
+	return assignments.length ? `export ${assignments.join(" ")}; ` : "";
+}
+
+function createStartDiagnostics() {
+	const lines: string[] = [];
+	let error = "";
+
+	const record = (text: string) => {
+		if (!text.trim()) return;
+		for (const line of text.split("\n")) {
+			const trimmed = line.trimEnd();
+			if (trimmed) lines.push(trimmed);
+		}
+		if (lines.length > AXS_OUTPUT_LIMIT) {
+			lines.splice(0, lines.length - AXS_OUTPUT_LIMIT);
+		}
+	};
+
+	return {
+		feed(type: string, data: string) {
+			const text = String(data ?? "");
+			record(text);
+			if (error) return;
+			if (
+				AXS_PORT_IN_USE_PATTERN.test(text) ||
+				AXS_FATAL_PATTERNS.some((pattern) => pattern.test(text))
+			) {
+				error = text.trim();
+			}
+		},
+		get error() {
+			return error;
+		},
+		get portInUse() {
+			return AXS_PORT_IN_USE_PATTERN.test(`${error}\n${lines.join("\n")}`);
+		},
+		tail() {
+			return lines.join("\n");
+		},
+	};
+}
+
+/**
+ * Reads every asset once per app session. A failed read clears the cache so a
+ * later launch can retry instead of replaying the rejection forever.
+ */
+async function readAssets() {
+	if (!assetCache) {
+		assetCache = (async () => {
+			const assets: Record<string, string> = {};
+			for (const name of ASSET_NAMES) {
+				assets[name] = await readAsset(name);
+			}
+			return assets;
+		})().catch((error) => {
+			assetCache = null;
+			throw error;
+		});
+	}
+	return assetCache;
+}
+
 function readAsset(assetPath: string, callback?: (text: string) => void) {
 	const assetUrl = "file:///android_asset/" + assetPath;
 	const promise = new Promise<string>((resolve, reject) => {
@@ -639,16 +1018,6 @@ async function ensureDir(path: string) {
 function writeText(path: string, content: string) {
 	return new Promise((resolve, reject) => {
 		system.writeText(path, content, resolve, reject);
-	});
-}
-function deleteFile(path: string) {
-	return new Promise((resolve, reject) => {
-		system.deleteFile(path, resolve, reject);
-	});
-}
-function setExec(path: string, executable: boolean) {
-	return new Promise((resolve, reject) => {
-		system.setExec(path, executable, resolve, reject);
 	});
 }
 function downloadFile(url: string, destination: string, label: string) {

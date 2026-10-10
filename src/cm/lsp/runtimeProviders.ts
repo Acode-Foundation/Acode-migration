@@ -6,7 +6,7 @@ import type {
 } from "./types";
 import { getConfiguredRuntimeId } from "./runtimeSettings";
 
-export const BUILTIN_ALPINE_RUNTIME_ID = "builtin-alpine";
+export const BUILTIN_UBUNTU_RUNTIME_ID = "builtin-ubuntu";
 export const EXTERNAL_WEBSOCKET_RUNTIME_ID = "external-websocket";
 export const WEB_WORKER_RUNTIME_ID = "web-worker";
 
@@ -176,7 +176,7 @@ export function inferWorkspaceKind(
 
 	if (!scheme) return uri.startsWith("/") ? "app-private" : "unknown";
 	if (scheme === "file") return "app-private";
-	if (scheme === "alpine") return "builtin-alpine";
+	if (scheme === "alpine") return "builtin-ubuntu";
 	if (scheme === "untitled") return "virtual";
 	if (
 		scheme === "ftp" ||
@@ -189,13 +189,13 @@ export function inferWorkspaceKind(
 	if (scheme !== "content") return "unknown";
 
 	if (/^content:\/\/com\.foxdebug\.acode(?:free)?\.documents\//i.test(uri)) {
-		return "builtin-alpine";
+		return "builtin-ubuntu";
 	}
 	if (/termux/i.test(uri)) return "termux-saf";
 	return "saf";
 }
 
-export function isBuiltinAlpineAccessible(
+export function isBuiltinUbuntuAccessible(
 	context: Pick<LspRuntimeContext, "uri" | "rootUri" | "file">,
 ): boolean {
 	const uri = String(context.rootUri || context.file?.uri || context.uri || "");
@@ -213,11 +213,11 @@ export function isBuiltinAlpineAccessible(
 }
 
 export default {
-	BUILTIN_ALPINE_RUNTIME_ID,
+	BUILTIN_UBUNTU_RUNTIME_ID,
 	WEB_WORKER_RUNTIME_ID,
 	getRuntimeProvider,
 	inferWorkspaceKind,
-	isBuiltinAlpineAccessible,
+	isBuiltinUbuntuAccessible,
 	listRuntimeProviders,
 	registerRuntimeProvider,
 	selectRuntimeProvider,

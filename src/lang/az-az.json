@@ -597,7 +597,7 @@
 	"lsp-install-info-unknown": "Quraşdırma vəziyyətini avtomatik yoxlamaq mümkün olmadı.",
 	"lsp-install-info-version-available": "{version} versiyası əlçatandır.",
 	"lsp-install-notification": "{server} dil serveri quraşdırılmayıb. Quraşdırmaq üçün toxun.",
-	"lsp-install-method-apk": "APK paketi",
+	"lsp-install-method-apt": "APT paketi",
 	"lsp-install-method-cargo": "Cargo paketi",
 	"lsp-install-method-manual": "Əl ilə quraşdırılan icra faylı",
 	"lsp-install-method-npm": "npm paketi",

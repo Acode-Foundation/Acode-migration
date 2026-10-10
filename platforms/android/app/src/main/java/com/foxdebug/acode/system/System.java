@@ -173,6 +173,7 @@ public class System extends Service {
       case "compare-file-text":
       case "compare-texts":
       case "extractAsset":
+      case "extractTarArchive":
       case "pin-file-shortcut":
         break;
       case "get-configuration":
@@ -433,6 +434,17 @@ public class System extends Service {
               } catch (Exception e) {
                 callbackContext.error(
                   "Failed to extract asset: " + e.getMessage()
+                );
+              }
+              return;
+            case "extractTarArchive":
+              try {
+                String sourcePath = args.getString(0);
+                String destinationPath = args.getString(1);
+                extractTarArchive(sourcePath, destinationPath, callbackContext);
+              } catch (Exception e) {
+                callbackContext.error(
+                  "Failed to extract tar archive: " + e.getMessage()
                 );
               }
               return;
@@ -2418,6 +2430,27 @@ public class System extends Service {
       StringWriter sw = new StringWriter();
       e.printStackTrace(new PrintWriter(sw));
       callback.error(sw.toString());
+    }
+  }
+
+  private void extractTarArchive(
+    String sourcePath,
+    String destinationPath,
+    Callback callback
+  ) {
+    try {
+      ArchiveExtractor.extract(new File(sourcePath), new File(destinationPath));
+      callback.success();
+    } catch (Exception e) {
+      // Keep the stack in logcat, but report a concise cause to the UI.
+      Log.e(TAG, "Failed to extract tar archive " + sourcePath, e);
+      String detail = e.getMessage();
+      callback.error(
+        "Failed to extract " +
+        sourcePath +
+        ": " +
+        (detail != null && !detail.isEmpty() ? detail : e.toString())
+      );
     }
   }
 }

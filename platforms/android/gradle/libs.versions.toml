@@ -10,6 +10,7 @@ appcompat = "1.8.0"
 bouncycastle = "1.86"
 browser = "1.10.0"
 commonsCodec = "1.22.1"
+commonsCompress = "1.28.0"
 commonsIo = "2.22.0"
 commonsNet = "3.13.0"
 core = "1.19.1"
@@ -25,6 +26,7 @@ robolectric = "4.17"
 securityCrypto = "1.1.0"
 userMessagingPlatform = "4.0.0"
 webkit = "1.17.1"
+xz = "1.12"
 
 [libraries]
 androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "appcompat" }
@@ -39,6 +41,7 @@ billing-client = { module = "com.android.billingclient:billing", version.ref = "
 bouncycastle-bcpkix = { module = "org.bouncycastle:bcpkix-jdk15to18", version.ref = "bouncycastle" }
 bouncycastle-bcprov = { module = "org.bouncycastle:bcprov-jdk15to18", version.ref = "bouncycastle" }
 commons-codec = { module = "commons-codec:commons-codec", version.ref = "commonsCodec" }
+commons-compress = { module = "org.apache.commons:commons-compress", version.ref = "commonsCompress" }
 commons-io = { module = "commons-io:commons-io", version.ref = "commonsIo" }
 commons-net = { module = "commons-net:commons-net", version.ref = "commonsNet" }
 java-websocket = { module = "org.java-websocket:Java-WebSocket", version.ref = "javaWebsocket" }
@@ -49,6 +52,8 @@ okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 play-services-ads = { module = "com.google.android.gms:play-services-ads", version.ref = "playServicesAds" }
 robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
 user-messaging-platform = { module = "com.google.android.ump:user-messaging-platform", version.ref = "userMessagingPlatform" }
+xz = { module = "org.tukaani:xz", version.ref = "xz" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }
