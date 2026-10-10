@@ -18,7 +18,7 @@ final class SystemService: BaseService {
         share.reset()
         DispatchQueue.main.async { [weak self] in
             IncomingLinks.shared.reset()
-            self?.viewController?.fullscreen.reset()
+            self?.viewController?.fullscreen.setActive(false)
             (self?.webView as? AppWebView)?.nativeContextMenuDisabled = false
         }
     }
@@ -76,14 +76,23 @@ final class SystemService: BaseService {
                 }
             case "get-intent": DispatchQueue.main.async { IncomingLinks.shared.current(callback) }
             case "set-intent-handler": DispatchQueue.main.async { IncomingLinks.shared.listen(callback) }
+            case "set-fullscreen":
+                DispatchQueue.main.async { [weak self] in
+                    guard let fullscreen = self?.viewController?.fullscreen,
+                          let active = args[safe: 0] as? Bool else { callback.error("Invalid fullscreen request"); return }
+                    fullscreen.setActive(active, callback: callback)
+                }
             case "set-fullscreen-orientation":
                 DispatchQueue.main.async { [weak self] in
                     guard let fullscreen = self?.viewController?.fullscreen else { callback.error("View unavailable"); return }
                     fullscreen.setOrientation(args[safe: 0], callback: callback)
                 }
             case "set-fullscreen-back-handler":
-                if args[safe: 0] as? Bool == true { callback.error("Android Back handling is unavailable on iOS") }
-                else { callback.success() }
+                DispatchQueue.main.async { [weak self] in
+                    guard let fullscreen = self?.viewController?.fullscreen,
+                          let enabled = args[safe: 0] as? Bool else { callback.error("Invalid Back handler request"); return }
+                    fullscreen.setBackHandler(enabled, callback: callback)
+                }
             case "set-native-context-menu-disabled":
                 DispatchQueue.main.async { [weak self] in
                     (self?.webView as? AppWebView)?.nativeContextMenuDisabled = (args[safe: 0] as? String == "true")

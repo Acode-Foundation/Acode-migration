@@ -347,6 +347,15 @@ export default class TerminalTouchSelection {
 		// Terminal resize listener (for keyboard events)
 		this.boundHandlers.terminalResize = this.onTerminalResize.bind(this);
 		this.terminal.onResize(this.boundHandlers.terminalResize);
+
+		// Chromium's native long-press (~500 ms) lands after our tap-hold timer and
+		// blurs the terminal, closing the keyboard and resizing the grid under the
+		// menu. Refocusing in the same task keeps the IME from ever hiding.
+		this.boundHandlers.textareaBlur = this.onTextareaBlur.bind(this);
+		this.terminal.textarea?.addEventListener(
+			"blur",
+			this.boundHandlers.textareaBlur,
+		);
 	}
 
 	onTerminalTouchStart(event) {
@@ -681,6 +690,11 @@ export default class TerminalTouchSelection {
 				this.updateHandlePositions();
 			}
 		}, this.resizeSettleDelay);
+	}
+
+	onTextareaBlur(event) {
+		if (!this.isSelectionTouchActive || event.relatedTarget) return;
+		this.terminal.textarea?.focus({ preventScroll: true });
 	}
 
 	onTerminalScroll() {
@@ -1600,6 +1614,10 @@ export default class TerminalTouchSelection {
 
 		this.terminalScrollDisposable?.dispose();
 		this.terminalScrollDisposable = null;
+		this.terminal.textarea?.removeEventListener(
+			"blur",
+			this.boundHandlers.textareaBlur,
+		);
 		window.removeEventListener(
 			"orientationchange",
 			this.boundHandlers.orientationChange,

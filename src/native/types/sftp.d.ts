@@ -135,7 +135,7 @@ interface Sftp {
 	close(onSuccess: () => void, onFail: (err: any) => void): void;
 
 	/**
-	 * Gets whether server is connected or not.
+	 * checks whether server is connected or not.
 	 * @param onSuccess
 	 * @param onFail
 	 */

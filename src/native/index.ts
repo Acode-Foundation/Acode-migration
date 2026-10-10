@@ -1,3 +1,5 @@
+// Installs the polyfills for the whole app and its plugins; main.js relies on
+// this bundle loading first.
 import "core-js/stable";
 import buildInfo, { initializeBuildInfo } from "./buildInfo";
 import clipboard from "./clipboard";

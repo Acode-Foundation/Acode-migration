@@ -1,5 +1,5 @@
 import "./styles.scss";
-import lspClientManager from "cm/lsp/clientManager";
+import { getLoadedLspClient } from "cm/lsp/clientLoader";
 import {
 	getCurrentFileLanguage,
 	getServersForCurrentFile,
@@ -16,7 +16,7 @@ let dialogInstance = null;
 
 function getActiveClients() {
 	try {
-		return lspClientManager.getActiveClients();
+		return getLoadedLspClient()?.clientManager.getActiveClients() ?? [];
 	} catch {
 		return [];
 	}
@@ -146,7 +146,7 @@ async function restartAllServers() {
 	toast(`Restarting ${count} LSP server${count > 1 ? "s" : ""}...`);
 
 	try {
-		await lspClientManager.dispose();
+		await getLoadedLspClient()?.clientManager.dispose();
 		window.editorManager?.restartLsp?.();
 		toast("All servers restarted");
 	} catch (err) {
@@ -164,7 +164,7 @@ async function stopAllServers() {
 	const count = activeClients.length;
 
 	try {
-		await lspClientManager.dispose();
+		await getLoadedLspClient()?.clientManager.dispose();
 		toast(`Stopped ${count} LSP server${count > 1 ? "s" : ""}`);
 	} catch (err) {
 		toast("Failed to stop servers");

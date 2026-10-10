@@ -3,6 +3,7 @@ import sidebarApps from "sidebarApps";
 import collapsableList from "components/collapsableList";
 import FileTree from "components/fileTree";
 import Sidebar from "components/sidebar";
+import { loadTerminalManager } from "components/terminal/loader";
 import tile from "components/tile";
 import toast from "components/toast";
 import alert from "dialogs/alert";
@@ -545,9 +546,7 @@ function execOperation(type, action, url, $target, name) {
 
 	async function openInTerminal() {
 		try {
-			const { TerminalManager } = await import(
-				/* webpackChunkName: "terminal" */ "components/terminal"
-			);
+			const TerminalManager = await loadTerminalManager();
 			const prootPath = convertToProotPath(url);
 			const terminal = await TerminalManager.createTerminal({
 				name: `Terminal - ${name}`,
@@ -581,9 +580,7 @@ function execOperation(type, action, url, $target, name) {
 
 	async function openSshTerminal() {
 		try {
-			const { TerminalManager } = await import(
-				/* webpackChunkName: "terminal" */ "components/terminal"
-			);
+			const TerminalManager = await loadTerminalManager();
 			await TerminalManager.createRemoteTerminal({ url, name });
 			Sidebar.hide();
 		} catch (error) {

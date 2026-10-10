@@ -2,6 +2,7 @@ import { fromArrayBuffer } from "../../native/base64";
 import type { NativeExec } from "../../native/bridge";
 import { createTransport } from "../../native/bridge";
 import installAPITransport from "./api";
+import installFullscreen from "./fullscreen";
 import proxy from "./proxy";
 
 export interface IOSReply {
@@ -45,5 +46,11 @@ export default function setup() {
 		if (handler) handler(success, error, args);
 		else transport.exec(success, error, service, action, args);
 	};
+	installFullscreen(
+		(active) =>
+			new Promise((resolve, reject) =>
+				transport.exec(resolve, reject, "System", "set-fullscreen", [active]),
+			),
+	);
 	return exec;
 }

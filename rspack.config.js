@@ -14,9 +14,19 @@ module.exports = (env, options) => {
   const devPort = process.env.DEV_PORT || '';
   const devProto = isDev ? (process.env.DEV_PROTO || '') : '';
 
+  // Match the oldest engine each platform supports (MIN_WEBVIEW_MAJOR in
+  // src/index.html, IPHONEOS_DEPLOYMENT_TARGET in Xcode) instead of plain
+  // ES2015, so native async/await, classes and spread are kept. `entry` mode
+  // rewrites `import "core-js/stable"` to only the polyfills that engine still
+  // needs, so plugins keep every global they could rely on.
+  const swcEnv = {
+    targets: platform === 'ios' ? 'ios_saf >= 18' : 'chrome >= 67',
+    mode: 'entry',
+    coreJs: require('core-js/package.json').version,
+  };
   const typescriptLoader = {
     loader: 'builtin:swc-loader',
-    options: { jsc: { parser: { syntax: 'typescript', tsx: false }, target: 'es2015' } },
+    options: { jsc: { parser: { syntax: 'typescript', tsx: false } }, env: swcEnv },
   };
   const rules = [
     {
@@ -50,8 +60,8 @@ module.exports = (env, options) => {
                   parser: {
                     syntax: 'ecmascript',
                   },
-                  target: 'es2015',
                 },
+                env: swcEnv,
               },
             },
           ],
@@ -67,8 +77,8 @@ module.exports = (env, options) => {
                     syntax: 'ecmascript',
                     jsx: false,
                   },
-                  target: 'es2015',
                 },
+                env: swcEnv,
               },
             },
             path.resolve(__dirname, 'dev/custom-loaders/html-tag-jsx-loader.js'),

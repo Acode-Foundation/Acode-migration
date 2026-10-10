@@ -154,11 +154,11 @@ function setup() {
 			"handlers/quickTools",
 			"handlers/tabContextMenu",
 			"dompurify",
-			"mime-types",
+			"utils/mimeTypes",
 			"utils/codeHighlight",
 			"utils/Path",
 			"./openFolder",
-			"./run",
+			"./runLazily",
 			"cm/editorReadOnly",
 			"lib/quickToolsAdapter",
 		].map((id) => [id, {}]),
@@ -642,6 +642,7 @@ it.each(["cached text", "", undefined])(
 			shouldApplyLanguage: () => false,
 			restoreFileScrollPosition: vi.fn(),
 			scheduleLspForFile: vi.fn(),
+			syncEmmetForFile: vi.fn(),
 		});
 		// Run the actual render functions with a real EditorView; omit the unrelated app shell.
 		vm.runInContext(
