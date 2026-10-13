@@ -1,0 +1,15 @@
+#include "AcodeUbuntu.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include "tools/fakefs.h"
+
+bool ubuntu_import(const char *archive, const char *root, char *error, size_t capacity) {
+    struct fakefsify_error failure = {0};
+    bool result = fakefs_import(archive, root, &failure, (struct progress){0});
+    if (!result) {
+        snprintf(error, capacity, "%s", failure.message ? failure.message : "Could not extract Ubuntu");
+        free(failure.message);
+    }
+    return result;
+}
+

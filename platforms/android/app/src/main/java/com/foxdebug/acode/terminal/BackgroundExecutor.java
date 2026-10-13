@@ -61,10 +61,10 @@ public class BackgroundExecutor extends Service {
         }
     }
 
-    private void exec(String cmd, boolean useAlpine, Callback callbackContext) {
+    private void exec(String cmd, boolean useUbuntu, Callback callbackContext) {
         host.getThreadPool().execute(() -> {
             try {
-                ProcessManager.ExecResult result = processManager.executeCommand(cmd, useAlpine);
+                ProcessManager.ExecResult result = processManager.executeCommand(cmd, useUbuntu);
                 
                 if (result.isSuccess()) {
                     callbackContext.success(result.stdout);
@@ -77,17 +77,17 @@ public class BackgroundExecutor extends Service {
         });
     }
 
-    private void startProcess(String pid, String cmd, boolean useAlpine, Callback callbackContext) {
+    private void startProcess(String pid, String cmd, boolean useUbuntu, Callback callbackContext) {
         host.getThreadPool().execute(() -> {
             try {
-                ProcessBuilder builder = processManager.createProcessBuilder(cmd, useAlpine);
+                ProcessBuilder builder = processManager.createProcessBuilder(cmd, useUbuntu);
                 Process process = builder.start();
 
                 long pidVal = ProcessUtils.getPid(process);
                 processes.put(pid, process);
                 processInputs.put(pid, process.getOutputStream());
                 processCallbacks.put(pid, callbackContext);
-                processDetails.put(pid, new ProcessDetails(cmd, useAlpine, pidVal));
+                processDetails.put(pid, new ProcessDetails(cmd, useUbuntu, pidVal));
 
                 sendPayload(callbackContext, pid, true);
 
@@ -164,7 +164,7 @@ public class BackgroundExecutor extends Service {
                 JSONObject item = new JSONObject();
                 item.put("id", id);
                 item.put("command", details.command);
-                item.put("alpine", details.alpine);
+                item.put("ubuntu", details.ubuntu);
                 item.put("startedAt", details.startedAt);
                 item.put("pid", details.pid);
                 result.put(item);
@@ -225,13 +225,13 @@ public class BackgroundExecutor extends Service {
 
     private static class ProcessDetails {
         final String command;
-        final boolean alpine;
+        final boolean ubuntu;
         final long startedAt;
         final long pid;
 
-        ProcessDetails(String command, boolean alpine, long pid) {
+        ProcessDetails(String command, boolean ubuntu, long pid) {
             this.command = command;
-            this.alpine = alpine;
+            this.ubuntu = ubuntu;
             this.startedAt = System.currentTimeMillis();
             this.pid = pid;
         }

@@ -391,7 +391,7 @@ public class Executor extends Service {
         }
     }
 
-    private void startProcess(String pid, String cmd, String alpine) {
+    private void startProcess(String pid, String cmd, String ubuntu) {
         com.foxdebug.acode.runtime.Callback callbackContext = getCallbackContext(pid);
         if (callbackContext != null) {
             Payload result = new Payload(Payload.Status.OK, pid);
@@ -404,7 +404,7 @@ public class Executor extends Service {
         Bundle bundle = new Bundle();
         bundle.putString("id", pid);
         bundle.putString("cmd", cmd);
-        bundle.putString("alpine", alpine);
+        bundle.putString("ubuntu", ubuntu);
         msg.setData(bundle);
         try {
             serviceMessenger.send(msg);
@@ -417,13 +417,13 @@ public class Executor extends Service {
         }
     }
 
-    private void exec(String execId, String cmd, String alpine) {
+    private void exec(String execId, String cmd, String ubuntu) {
         Message msg = Message.obtain(null, TerminalService.MSG_EXEC);
         msg.replyTo = handlerMessenger;
         Bundle bundle = new Bundle();
         bundle.putString("id", execId);
         bundle.putString("cmd", cmd);
-        bundle.putString("alpine", alpine);
+        bundle.putString("ubuntu", ubuntu);
         msg.setData(bundle);
         try {
             serviceMessenger.send(msg);

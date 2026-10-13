@@ -37,7 +37,7 @@ final class Bridge: NSObject, WKScriptMessageHandler {
             "Sftp":            SFTPService(bridge: self),
             "Ftp":             FTPService(bridge: self),
             "Iap":             IapService(bridge: self),
-            "Alpine":          AlpineService(bridge: self),
+            "Ubuntu":          UbuntuService(bridge: self),
             "Executor":        ExecutorService(bridge: self),
             "BackgroundExecutor": BackgroundExecutorService(bridge: self),
             "AdMob":           AMBPlugin(bridge: self),

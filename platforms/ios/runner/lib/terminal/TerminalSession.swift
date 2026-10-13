@@ -1,4 +1,4 @@
-import AcodeAlpine
+import AcodeUbuntu
 import Foundation
 
 /// One command on a guest pseudo-terminal. Output arrives on guest threads;
@@ -73,7 +73,7 @@ final class TerminalSession {
 
     func resize(rows: Int, cols: Int) {
         guard let handle else { return }
-        alpine_terminal_resize(handle, Int32(rows), Int32(cols))
+        ubuntu_terminal_resize(handle, Int32(rows), Int32(cols))
     }
 
     func terminate() {
@@ -143,7 +143,7 @@ final class TerminalSession {
 
     private func wakeWriters() {
         guard let handle else { return }
-        alpine_terminal_drained(handle)
+        ubuntu_terminal_drained(handle)
     }
 
     private func write(_ data: Data) {
@@ -156,7 +156,7 @@ final class TerminalSession {
     private func drainInput() {
         guard let handle, !input.isEmpty else { input.removeAll(); return }
         let written = input.withUnsafeBytes { bytes in
-            alpine_terminal_input(handle, bytes.bindMemory(to: CChar.self).baseAddress, bytes.count)
+            ubuntu_terminal_input(handle, bytes.bindMemory(to: CChar.self).baseAddress, bytes.count)
         }
         if written > 0 { input = Data(input.dropFirst(written)) }
         guard !input.isEmpty else { return }
@@ -167,7 +167,7 @@ final class TerminalSession {
         guard let handle else { return }
         self.handle = nil
         input.removeAll()
-        alpine_terminal_close(handle)
+        ubuntu_terminal_close(handle)
     }
 
     private static func exitMessage(_ code: Int32) -> Data {
@@ -180,7 +180,7 @@ final class TerminalSession {
     }
 }
 
-let terminalCallbacks = AlpineTerminalCallbacks(
+let terminalCallbacks = UbuntuTerminalCallbacks(
     output: { context, data, length in
         guard let context, let data else { return }
         Unmanaged<TerminalSession>.fromOpaque(context).takeUnretainedValue().receive(Data(bytes: data, count: length))

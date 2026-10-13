@@ -1,11 +1,11 @@
 import ajax from "lib/ajax";
 import { decode } from "utils/encodings";
 import Url from "utils/Url";
-import Alpine from "./alpine";
 import externalFs from "./externalFs";
 import Ftp from "./ftp";
 import internalFs from "./internalFs";
 import Sftp from "./sftp";
+import Ubuntu from "./ubuntu";
 
 const fsList = [];
 const registrationListeners = new Set();
@@ -91,7 +91,7 @@ fsOperation.remove = (test) => {
 };
 
 fsOperation.extend(Sftp.test, Sftp.fromUrl);
-fsOperation.extend(Alpine.test, Alpine.createFs);
+fsOperation.extend(Ubuntu.test, Ubuntu.createFs);
 fsOperation.extend(Ftp.test, Ftp.fromUrl);
 fsOperation.extend(internalFs.test, (url) => internalFs.createFs(url));
 fsOperation.extend(externalFs.test, (url) => externalFs.createFs(url));

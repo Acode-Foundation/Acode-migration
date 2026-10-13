@@ -130,7 +130,7 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
-      - name: Install Alpine runtime build tools
+      - name: Install Ubuntu runtime build tools
         run: brew install meson ninja llvm lld
       - name: Prepare local iOS configuration
         run: cp platforms/ios/Config.xcconfig.example platforms/ios/Config.xcconfig
