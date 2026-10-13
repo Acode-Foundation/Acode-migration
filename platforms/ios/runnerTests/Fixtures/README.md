@@ -5,7 +5,7 @@ with ordinary, immediate post-indexed and register post-indexed addressing.
 Rebuild it from the repository root with LLVM and LLD:
 
 ```sh
-clang --target=aarch64-linux-gnu -c platforms/ios/Alpine/Tests/halfword-lanes.S -o /tmp/halfword-lanes.o
+clang --target=aarch64-linux-gnu -c platforms/ios/Ubuntu/Tests/halfword-lanes.S -o /tmp/halfword-lanes.o
 ld.lld -static --strip-all -e _start /tmp/halfword-lanes.o -o platforms/ios/runnerTests/Fixtures/halfword-lanes.elf
 ```
 
@@ -15,7 +15,7 @@ Fatal faults must exit with the signal's status; handlers exit with status 42.
 Rebuild it with:
 
 ```sh
-clang --target=aarch64-linux-gnu -c platforms/ios/Alpine/Tests/fault-signals.S -o /tmp/fault-signals.o
+clang --target=aarch64-linux-gnu -c platforms/ios/Ubuntu/Tests/fault-signals.S -o /tmp/fault-signals.o
 ld.lld -static --strip-all -e _start /tmp/fault-signals.o -o platforms/ios/runnerTests/Fixtures/fault-signals.elf
 ```
 

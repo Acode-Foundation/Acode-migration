@@ -35,10 +35,14 @@ log_ok "Node.js package repository ready"
 # tzdata lets /etc/localtime resolve and libjemalloc2 backs the Node.js
 # wrapper. Best effort and time-bounded so an offline install still works.
 # Setup reaches the network here, for the package lists and NodeSource.
+# The app only installs the wrapper where it is needed (not on iOS, whose
+# emulator recognises Node.js by its file name).
 
 APT_PACKAGES=""
 [ -d /usr/share/zoneinfo ] || APT_PACKAGES="tzdata"
-dpkg -s libjemalloc2 >/dev/null 2>&1 || APT_PACKAGES="$APT_PACKAGES libjemalloc2"
+if [ -x /usr/local/bin/node-postinstall.sh ] && ! dpkg -s libjemalloc2 >/dev/null 2>&1; then
+    APT_PACKAGES="$APT_PACKAGES libjemalloc2"
+fi
 
 if [ -n "$APT_PACKAGES" ]; then
     log_step "Installing required packages: $APT_PACKAGES"
@@ -60,6 +64,7 @@ fi
 
 log_step "Applying timezone..."
 sync_timezone
+configure_npm_prefix
 run_node_jemalloc_hook
 log_ok "Timezone and Node.js runtime configured"
 
@@ -69,10 +74,13 @@ log_ok "Timezone and Node.js runtime configured"
 
 log_step "Preparing rootfs layout..."
 
-mkdir -p /linkerconfig
+# proot binds Android's linker config here when the device has one.
+if [ "$UBUNTU_ROOT" != "/" ]; then
+    mkdir -p /linkerconfig
 
-if [ ! -f /linkerconfig/ld.config.txt ]; then
-    touch /linkerconfig/ld.config.txt
+    if [ ! -f /linkerconfig/ld.config.txt ]; then
+        touch /linkerconfig/ld.config.txt
+    fi
 fi
 
 mkdir -p "$HOME"
@@ -85,9 +93,11 @@ fi
 # Register the Android GIDs so `groups`/`id` can name them
 # --------------------------------------------------------
 
-log_step "Registering Android groups..."
-register_android_groups
-log_ok "Android groups registered"
+if [ "$UBUNTU_ROOT" != "/" ]; then
+    log_step "Registering Android groups..."
+    register_android_groups
+    log_ok "Android groups registered"
+fi
 
 # --------------------------------------------------------
 # Mark rootfs as configured
@@ -101,11 +111,11 @@ touch "$PREFIX/.configured/rootfs"
 # artifacts actually landed instead of announcing completion unconditionally.
 missing=""
 for required in \
-    "$PREFIX/ubuntu/bin/sh" \
-    "$PREFIX/ubuntu/bin/bash" \
-    "$PREFIX/ubuntu/etc/group" \
-    "$PREFIX/ubuntu/initrc" \
-    "$PREFIX/ubuntu/usr/local/bin/acode" \
+    "${UBUNTU_ROOT%/}/bin/sh" \
+    "${UBUNTU_ROOT%/}/bin/bash" \
+    "${UBUNTU_ROOT%/}/etc/group" \
+    "${UBUNTU_ROOT%/}/initrc" \
+    "${UBUNTU_ROOT%/}/usr/local/bin/acode" \
     "$PREFIX/.configured/rootfs"; do
     [ -e "$required" ] || missing="$missing $required"
 done

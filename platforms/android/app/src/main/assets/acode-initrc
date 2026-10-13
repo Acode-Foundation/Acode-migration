@@ -77,9 +77,12 @@ command_not_found_handle() {
     local cmd="$1"
     local pkg=""
 
+    # Only a package named exactly like the command is suggested. pkgnames
+    # reads names alone; `apt-cache search` also scans every description and
+    # takes over ten seconds per typo in the iOS emulator.
     pkg="$(
-        apt-cache search "^${cmd}$" 2>/dev/null |
-        awk '{print $1}' |
+        apt-cache pkgnames "$cmd" 2>/dev/null |
+        grep -Fx -- "$cmd" |
         head -n 1
     )"
 

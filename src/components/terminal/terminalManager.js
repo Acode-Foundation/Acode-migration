@@ -1336,7 +1336,7 @@ class TerminalManager {
 			if (/^\/(public|home|root)(\/|$)/.test(prootPath)) {
 				return `${Bridge.file.dataDirectory}public${prootPath.replace(/^\/(public|home|root)/, "")}`;
 			}
-			return `alpine://localhost${prootPath.split("/").map(encodeURIComponent).join("/")}`;
+			return `ubuntu://localhost${prootPath.split("/").map(encodeURIComponent).join("/")}`;
 		}
 
 		const packageName = window.BuildInfo?.packageName || "com.foxdebug.acode";

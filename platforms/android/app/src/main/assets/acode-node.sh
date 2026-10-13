@@ -81,6 +81,18 @@ EOF
     fi
 }
 
+# npm takes its default global prefix from $PREFIX (a Termux convention), which
+# here is the app's data directory, so `npm install -g` put commands outside
+# PATH. Its global config sits under that prefix; pin global installs to
+# /usr/local there, where ~/.npmrc can still override it. An existing file is
+# left alone so a user's edits survive.
+configure_npm_prefix() {
+    [ -n "$PREFIX" ] || return 0
+    [ -e "$PREFIX/etc/npmrc" ] && return 0
+
+    mkdir -p "$PREFIX/etc" && printf 'prefix=/usr/local\n' > "$PREFIX/etc/npmrc"
+}
+
 # dpkg puts a real binary back on upgrade, so the wrapper is re-applied on the
 # install path and on every launch.
 run_node_jemalloc_hook() {

@@ -4,13 +4,16 @@
 # (dash). The generated shell files are already in the rootfs, written by the
 # app, so this module only refreshes the runtime state.
 
-# One file per session: a single $PREFIX/pid only ever names the newest shell,
-# so stopping the terminal left the other tabs running.
-echo "$$" > "$PREFIX/pid.$$"
-#keeping fro backward compatibility
-echo "$$" > "$PREFIX/pid"
+# --prepare runs no session and starts no AXS, so it records nothing.
+if [ "$PREPARE" != true ]; then
+    # One file per session: a single $PREFIX/pid only ever names the newest
+    # shell, so stopping the terminal left the other tabs running.
+    echo "$$" > "$PREFIX/pid.$$"
+    #keeping fro backward compatibility
+    echo "$$" > "$PREFIX/pid"
 
-chmod +x "$PREFIX/axs"
+    chmod +x "$PREFIX/axs"
+fi
 
 if [ "$FAILSAFE" = true ]; then
     log_warn "FailSafe mode is on skipping ubuntu launch."
@@ -22,7 +25,12 @@ fi
 # dpkg upgrade that restores the real node binary is re-wrapped.
 register_android_groups
 sync_timezone
+configure_npm_prefix
 run_node_jemalloc_hook
+
+if [ "$PREPARE" = true ]; then
+    exit 0
+fi
 
 # AXS splits the `-c` string on whitespace and resolves the FIRST token as the
 # program (src/terminal/handlers.rs: cmd.split_whitespace()). A leading `exec`

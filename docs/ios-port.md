@@ -45,14 +45,14 @@ Android intents/package launching, APK updates, all-files access permissions
 and Android battery controls remain platform exclusions. The main menu offers
 Exit on iOS through `exit(0)`; Apple discourages programmatic termination, so
 App Review may flag it.
-Local terminals and native language-server processes use the ARM64 Alpine
-runtime described in [platforms/ios/Alpine/README.md](../platforms/ios/Alpine/README.md).
-It preserves Acode's terminal UI, AXS protocol and shell initialization script;
+Local terminals and native language-server processes use the ARM64 Ubuntu
+runtime described in [platforms/ios/Ubuntu/README.md](../platforms/ios/Ubuntu/README.md).
+It preserves Acode's terminal UI, AXS protocol and shell initialization scripts;
 Linux package compatibility is bounded by the emulator, Node JIT restrictions,
 and iOS process lifetime. Browser-based and remote language servers remain available.
 
 The native registration audit matches 22 of Android's 23 services to iOS services.
-`Executor` and `BackgroundExecutor` now execute inside Alpine. `CrashHandler`
+`Executor` and `BackgroundExecutor` now execute inside Ubuntu. `CrashHandler`
 only installs Android's uncaught-exception handler and starts its crash activity,
 with no public bridge actions. Launcher-shortcut, package-launch and
 storage-manager controls remain gated in commands, menus and settings. Of the
@@ -208,7 +208,7 @@ flags; 19 affected native checks pass per edition, with the final six startup/ed
 checks also verifying directory type errors. Incoming share tabs retain Android's
 temporary-session behavior. Other share destinations, third-party providers,
 iCloud and physical-device grants remain unverified. The file browser omits
-unavailable Android storage roots on iOS. Terminal Public is shared with Alpine. Acode's Documents
+unavailable Android storage roots on iOS. Terminal Public is shared with Ubuntu. Acode's Documents
 folder opens directly; a simulator test browses it and reads a selected file
 through the shared filesystem API.
 

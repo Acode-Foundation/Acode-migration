@@ -93,4 +93,4 @@ For plugin development information, refer to: [Acode Plugin Documentation](https
  </picture>
 </a>
 
-The iOS terminal uses an ARM64 Alpine emulator with the existing terminal UI and AXS server. See [runtime sources, build requirements, and compatibility limits](platforms/ios/Alpine/README.md).
+The iOS terminal runs the same ARM64 Ubuntu rootfs as Android in an emulator, with the existing terminal UI and AXS server. See [runtime sources, build requirements, and compatibility limits](platforms/ios/Ubuntu/README.md).

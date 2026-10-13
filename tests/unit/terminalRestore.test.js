@@ -112,7 +112,7 @@ vi.mock("../../src/native/http/advanced-http", () => ({
 	default: { downloadFile: () => {} },
 }));
 
-vi.mock("../../src/native/terminal/Alpine", () => ({ default: {} }));
+vi.mock("../../src/native/terminal/Ubuntu", () => ({ default: {} }));
 
 import Terminal from "../../src/native/terminal/Terminal";
 

@@ -58,6 +58,8 @@ _add_android_group() {
 register_android_groups() {
     local android_gid
 
+    # iOS guests run as root with no Android GIDs to name.
+    [ "$UBUNTU_ROOT" = "/" ] && return 0
     [ -w "$ACODE_GROUP_FILE" ] || return 0
 
     # The kernel still reports the real credentials even though proot -0 fakes

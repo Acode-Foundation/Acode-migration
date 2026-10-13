@@ -512,8 +512,8 @@ To create plugins for Acode:
 - [Plugin Starter Repository](https://github.com/Acode-Foundation/acode-plugin)
 - [Plugin Documentation](https://docs.acode.app/)
 
-### iOS Alpine terminal
+### iOS Ubuntu terminal
 
-Install `brew install meson ninja llvm lld` on an Apple Silicon Mac before building iOS. The normal scripts and direct Xcode builds compile the vendored runtime automatically. `Config.xcconfig` remains limited to ignored local signing information. See [Alpine runtime documentation](platforms/ios/Alpine/README.md) for source revisions, local adaptations, licensing, filesystem layout, and compatibility limits.
+Install `brew install meson ninja llvm lld` on an Apple Silicon Mac before building iOS. The normal scripts and direct Xcode builds compile the vendored runtime automatically. `Config.xcconfig` remains limited to ignored local signing information. See [Ubuntu runtime documentation](platforms/ios/Ubuntu/README.md) for source revisions, local adaptations, licensing, filesystem layout, and compatibility limits.
 
-The `AlpineTerminalTests`, `AlpineInteractionTests`, `AlpinePackageTests`, and `AlpineLspTests` suites exercise the real WebView bridge, installation, filesystem editing, backup/restore, interactive tabs, Node/npm, and the existing JSON language server. Installation and package tests require access to Alpine and npm repositories. Run them on a dedicated simulator because they install packages and restore its terminal filesystem. Keep physical-device performance and background validation separate from simulator results.
+The `UbuntuTerminalTests`, `UbuntuInteractionTests`, `UbuntuPackageTests`, and `UbuntuLspTests` suites exercise the real WebView bridge, installation, filesystem editing, backup/restore, interactive tabs, Node/npm, and the existing JSON language server. Installation and package tests require access to the Ubuntu, NodeSource and npm repositories. Run them on a dedicated simulator because they install packages and restore its terminal filesystem. Keep physical-device performance and background validation separate from simulator results.

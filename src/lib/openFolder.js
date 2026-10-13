@@ -43,8 +43,8 @@ const getTerminalPaths = () => {
 };
 
 const isTerminalAccessiblePath = (url = "") => {
-	// iOS Alpine bind-mounts every app root at its host path.
-	if (platform.isIOS) return /^(file|alpine):\/\//.test(url);
+	// iOS Ubuntu bind-mounts every app root at its host path.
+	if (platform.isIOS) return /^(file|ubuntu):\/\//.test(url);
 	if (isAcodeTerminalPublicSafUri(url)) return true;
 	const { ubuntuRoot, publicDir } = getTerminalPaths();
 	const cleanUrl = url.replace(/^file:\/\//, "");

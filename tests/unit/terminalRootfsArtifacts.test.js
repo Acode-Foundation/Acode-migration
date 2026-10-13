@@ -89,7 +89,7 @@ vi.mock("../../src/native/runtime", () => ({
 	default: { platformId: "android" },
 }));
 
-vi.mock("../../src/native/terminal/Alpine", () => ({ default: {} }));
+vi.mock("../../src/native/terminal/Ubuntu", () => ({ default: {} }));
 
 import Executor from "../../src/native/terminal/Executor";
 import Terminal from "../../src/native/terminal/Terminal";

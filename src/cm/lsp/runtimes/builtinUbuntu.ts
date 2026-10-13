@@ -74,11 +74,11 @@ export const builtinUbuntuRuntimeProvider: LspRuntimeProvider = {
 		context: LspRuntimeUriResolutionContext,
 	) {
 		const documentUri = context.originalDocumentUri || context.uri;
-		if (documentUri?.startsWith("alpine://localhost/")) {
+		if (documentUri?.startsWith("ubuntu://localhost/")) {
 			const root = context.originalRootUri || context.rootUri;
 			return {
-				documentUri: documentUri.replace("alpine://localhost/", "file:///"),
-				rootUri: root?.replace("alpine://localhost/", "file:///") || null,
+				documentUri: documentUri.replace("ubuntu://localhost/", "file:///"),
+				rootUri: root?.replace("ubuntu://localhost/", "file:///") || null,
 				scope: root ? "workspace" : "document",
 			};
 		}

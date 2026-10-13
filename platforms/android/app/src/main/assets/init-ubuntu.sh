@@ -3,7 +3,8 @@
 # ============================================================
 # Acode Ubuntu Rootfs launcher
 #
-# Runs inside proot under /bin/sh (dash), started by init-sandbox.sh. It keeps
+# Runs inside proot under /bin/sh (dash), started by init-sandbox.sh, or as the
+# guest root of the iOS Linux emulator, started by the app. It keeps
 # only what every invocation shares: the environment, argument parsing,
 # /etc/hosts and the dispatch into the install or launch module. Everything
 # else lives in a sibling acode-*.sh module, and the static shell files (initrc,
@@ -16,6 +17,10 @@ ACODE_INIT_DIR=$(dirname "$0")
 export PATH="/bin:/sbin:/usr/bin:/usr/sbin:/usr/share/bin:/usr/share/sbin:/usr/local/bin:/usr/local/sbin:/system/bin:/system/xbin:$PREFIX/local/bin"
 export HOME="/public"
 export TERM="xterm-256color"
+
+# Where the rootfs is seen from inside it. iOS runs it as the emulator's root
+# instead of binding $PREFIX into proot, and passes UBUNTU_ROOT=/.
+UBUNTU_ROOT="${UBUNTU_ROOT:-$PREFIX/ubuntu}"
 
 # Shared paths and values read by the sourced modules.
 ACODE_GROUP_FILE="/etc/group"
@@ -31,6 +36,7 @@ ACODE_APT_PREFERENCES="/etc/apt/preferences.d"
 
 INSTALLING=false
 FAILSAFE=false
+PREPARE=false
 
 . "$ACODE_INIT_DIR/acode-log.sh"
 . "$ACODE_INIT_DIR/acode-groups.sh"
@@ -49,6 +55,12 @@ while [ "$#" -gt 0 ]; do
             ;;
         --failsafe)
             FAILSAFE=true
+            shift
+            ;;
+        # iOS serves terminals from the app, so it only needs the per-launch
+        # rootfs refresh, once per boot.
+        --prepare)
+            PREPARE=true
             shift
             ;;
         --)
