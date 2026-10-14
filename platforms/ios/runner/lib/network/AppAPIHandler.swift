@@ -13,33 +13,12 @@ final class AppAPIHandler {
     func start(_ task: WKURLSchemeTask) {
         let id = ObjectIdentifier(task)
         do {
-            guard let source = task.request.url, source.scheme == "acode", source.host == "localhost", source.path.hasPrefix("/__api__/") else { throw URLError(.badURL) }
-            var destination = URLComponents(url: origin, resolvingAgainstBaseURL: false)!
-            let incoming = URLComponents(url: source, resolvingAgainstBaseURL: false)!
-            destination.percentEncodedPath = "/api/" + incoming.percentEncodedPath.dropFirst("/__api__/".count)
-            destination.percentEncodedQuery = incoming.percentEncodedQuery
-            guard let url = destination.url else { throw URLError(.badURL) }
-            var request = task.request
-            request.url = url
-            request.mainDocumentURL = origin
-            let credentials = request.value(forHTTPHeaderField: "X-Acode-Credentials") == "include"
-            let redirects = request.value(forHTTPHeaderField: "X-Acode-Redirect") ?? "follow"
-            request.httpShouldHandleCookies = credentials
-            for key in (request.allHTTPHeaderFields ?? [:]).keys where ["host", "origin", "referer", "cookie", "content-length"].contains(key.lowercased()) || key.lowercased().hasPrefix("x-acode-") || key.lowercased().hasPrefix("sec-") {
-                request.setValue(nil, forHTTPHeaderField: key)
-            }
-            request.setValue("https://localhost", forHTTPHeaderField: "Origin")
-            request.setValue("https://localhost/", forHTTPHeaderField: "Referer")
-            if credentials, AppAuthentication.accepts(url) {
-                let token = try auth.secrets.get("auth_token")
-                if !token.isEmpty {
-                    var cookies = (HTTPCookieStorage.shared.cookies(for: url) ?? []).filter { $0.name != "token" }
-                    if let cookie = HTTPCookie(properties: [.name: "token", .value: token, .domain: url.host!, .path: "/", .secure: "TRUE"]) { cookies.append(cookie) }
-                    request.setValue(HTTPCookie.requestHeaderFields(with: cookies)["Cookie"], forHTTPHeaderField: "Cookie")
-                }
-            }
+            let request = try request(for: task.request)
+            let source = task.request.url!
+            let url = request.url!
+            let redirects = task.request.value(forHTTPHeaderField: "X-Acode-Redirect") ?? "follow"
             let transport = HTTPTransport(request: request, followRedirects: redirects == "follow", connectTimeout: 30, readTimeout: 60, cookieStorage: .shared)
-            transport.allowRedirect = { [origin] next in next.scheme == origin.scheme && next.host == origin.host && next.port == origin.port && next.user == nil && next.password == nil }
+            transport.allowRedirect = { next in next.scheme == url.scheme && next.host == url.host && next.port == url.port && next.user == nil && next.password == nil }
             transport.onResponse = { response in
                 if redirects == "error", (300..<400).contains(response.statusCode) { throw URLError(.redirectToNonExistentLocation) }
                 var headers: [String: String] = [:]
@@ -66,4 +45,33 @@ final class AppAPIHandler {
     }
 
     func stop(_ task: WKURLSchemeTask) { requests.removeValue(forKey: ObjectIdentifier(task))?.cancel() }
+
+    func request(for incomingRequest: URLRequest) throws -> URLRequest {
+        guard let source = incomingRequest.url, source.scheme == "acode", source.host == "localhost", source.path.hasPrefix("/__api__/") else { throw URLError(.badURL) }
+        let origin = try incomingRequest.value(forHTTPHeaderField: "X-Acode-API-Origin").map(AppAuthentication.baseURL) ?? self.origin
+        var destination = URLComponents(url: origin, resolvingAgainstBaseURL: false)!
+        let incoming = URLComponents(url: source, resolvingAgainstBaseURL: false)!
+        destination.percentEncodedPath = "/api/" + incoming.percentEncodedPath.dropFirst("/__api__/".count)
+        destination.percentEncodedQuery = incoming.percentEncodedQuery
+        guard let url = destination.url else { throw URLError(.badURL) }
+        var request = incomingRequest
+        request.url = url
+        request.mainDocumentURL = origin
+        let credentials = request.value(forHTTPHeaderField: "X-Acode-Credentials") == "include"
+        let trusted = AppAuthentication.accepts(url)
+        request.httpShouldHandleCookies = credentials && !trusted
+        for key in (request.allHTTPHeaderFields ?? [:]).keys where ["host", "origin", "referer", "cookie", "content-length"].contains(key.lowercased()) || key.lowercased().hasPrefix("x-acode-") || key.lowercased().hasPrefix("sec-") {
+            request.setValue(nil, forHTTPHeaderField: key)
+        }
+        request.setValue("https://localhost", forHTTPHeaderField: "Origin")
+        request.setValue("https://localhost/", forHTTPHeaderField: "Referer")
+        if credentials, trusted {
+            // A parent-domain cookie must not override the token for the selected environment.
+            var cookies = (HTTPCookieStorage.shared.cookies(for: url) ?? []).filter { $0.name != "token" }
+            let token = try auth.token(for: url)
+            if !token.isEmpty, let cookie = HTTPCookie(properties: [.name: "token", .value: token, .domain: url.host!, .path: "/", .secure: "TRUE"]) { cookies.append(cookie) }
+            request.setValue(HTTPCookie.requestHeaderFields(with: cookies)["Cookie"], forHTTPHeaderField: "Cookie")
+        }
+        return request
+    }
 }

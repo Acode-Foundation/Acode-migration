@@ -58,6 +58,11 @@ export default function installAPIXHR(
 			);
 		setRequestHeader.call(
 			this,
+			"X-Acode-API-Origin",
+			new URL(state.url, location.href).origin,
+		);
+		setRequestHeader.call(
+			this,
 			"X-Acode-Credentials",
 			this.withCredentials ? "include" : "omit",
 		);
