@@ -1,4 +1,5 @@
 import config from "./config";
+import platform from "./platform";
 
 /**
  * @typedef {object} User
@@ -59,7 +60,7 @@ class AuthService {
 			clearTimeout(this.#loginTimeout);
 			this.#loginTimeout = setTimeout(() => {
 				for (const callback of this.#loginCallbacks) {
-					callback.reject("Login timed out");
+					callback.reject(new Error("Sign-in timed out. Please try again."));
 				}
 
 				this.#loginCallbacks.clear();
@@ -80,6 +81,8 @@ class AuthService {
 		try {
 			const res = await fetch(`${config.API_BASE}/login`, {
 				method: "DELETE",
+				credentials: "include",
+				cache: "no-store",
 			});
 			if (!res.ok) {
 				throw new Error("Unable to logout.");
@@ -100,6 +103,11 @@ class AuthService {
 		}
 	}
 
+	async openAccount() {
+		await this.#exec("openAccount", [{ baseUrl: config.BASE_URL }]);
+		return this.getLoggedInUser(true).catch(() => undefined);
+	}
+
 	/**
 	 * @param {boolean} forceFetch
 	 * @returns {Promise<User>}
@@ -108,7 +116,10 @@ class AuthService {
 		if (loggedInUser && !forceFetch) return loggedInUser;
 
 		try {
-			const res = await fetch(`${config.API_BASE}/login`);
+			const res = await fetch(`${config.API_BASE}/login`, {
+				credentials: "include",
+				cache: "no-store",
+			});
 
 			if (res.ok) {
 				loggedInUser = await res.json();
@@ -119,13 +130,15 @@ class AuthService {
 			}
 
 			if (res.status === 401) {
+				loggedInUser = null;
+				clearTimeout(cacheTimeout);
 				localStorage.removeItem(CACHE_USER_KEY);
 				return null;
 			}
 
 			throw new Error("Unable to fetch user Info");
 		} catch (error) {
-			if (CACHE_USER_KEY in localStorage) {
+			if (!forceFetch && CACHE_USER_KEY in localStorage) {
 				try {
 					return JSON.parse(localStorage.getItem(CACHE_USER_KEY));
 				} catch {}
@@ -139,19 +152,30 @@ class AuthService {
 		return new Promise((resolve, reject) => {
 			const callback = { resolve, reject };
 			this.#loginCallbacks.add(callback);
+			if (this.#loginCallbacks.size > 1) return;
 			this.#exec("login", [
 				{
 					baseUrl: config.BASE_URL,
 					appVersionCode: window.BuildInfo?.versionCode || 0,
 				},
 			])
-				.then(() => {
-					loginEvents.emit();
+				.then(async () => {
+					if (!this.#loginCallbacks.has(callback)) return;
+					if (platform.isIOS && !(await this.getLoggedInUser(true))) {
+						throw new Error("Sign-in did not complete. Please try again.");
+					}
+					if (this.#loginCallbacks.has(callback)) loginEvents.emit();
 				})
 				.catch((err) => {
+					if (!this.#loginCallbacks.has(callback)) return;
 					console.error("Native login error", err);
-					this.#loginCallbacks.delete(callback);
-					reject("Failed to login");
+					clearTimeout(this.#loginTimeout);
+					const error =
+						err instanceof Error
+							? err
+							: new Error(String(err || "Sign-in failed. Please try again."));
+					for (const pending of this.#loginCallbacks) pending.reject(error);
+					this.#loginCallbacks.clear();
 				});
 		});
 	}

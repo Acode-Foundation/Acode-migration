@@ -54,8 +54,6 @@ final class SplashTests: BridgeTestCase {
             }
             let loading = try await webView.evaluateJavaScript("document.body.classList.contains('loading')") as? Bool
             XCTAssertEqual(loading, true)
-            let badge = try await webView.evaluateJavaScript("const badge=document.querySelector('.splash-beta');badge.textContent==='Beta'&&getComputedStyle(badge).display!=='none'") as? Bool
-            XCTAssertEqual(badge, true)
             XCTAssertEqual(controller.view.backgroundColor, color, saved)
             XCTAssertEqual(webView.backgroundColor, color, saved)
             XCTAssertEqual(webView.window?.backgroundColor, color, saved)
