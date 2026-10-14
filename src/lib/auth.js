@@ -1,5 +1,4 @@
 import config from "./config";
-import platform from "./platform";
 
 /**
  * @typedef {object} User
@@ -81,8 +80,6 @@ class AuthService {
 		try {
 			const res = await fetch(`${config.API_BASE}/login`, {
 				method: "DELETE",
-				credentials: "include",
-				cache: "no-store",
 			});
 			if (!res.ok) {
 				throw new Error("Unable to logout.");
@@ -117,7 +114,6 @@ class AuthService {
 
 		try {
 			const res = await fetch(`${config.API_BASE}/login`, {
-				credentials: "include",
 				cache: "no-store",
 			});
 
@@ -159,12 +155,12 @@ class AuthService {
 					appVersionCode: window.BuildInfo?.versionCode || 0,
 				},
 			])
-				.then(async () => {
+				.then(() => {
 					if (!this.#loginCallbacks.has(callback)) return;
-					if (platform.isIOS && !(await this.getLoggedInUser(true))) {
-						throw new Error("Sign-in did not complete. Please try again.");
-					}
-					if (this.#loginCallbacks.has(callback)) loginEvents.emit();
+					loggedInUser = null;
+					clearTimeout(cacheTimeout);
+					localStorage.removeItem(CACHE_USER_KEY);
+					loginEvents.emit();
 				})
 				.catch((err) => {
 					if (!this.#loginCallbacks.has(callback)) return;

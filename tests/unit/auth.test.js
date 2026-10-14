@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 vi.mock("../../src/lib/config", () => ({ default: { BASE_URL: "https://dev.acode.app", API_BASE: "https://dev.acode.app/api" } }));
-vi.mock("../../src/lib/platform", () => ({ default: { isIOS: true } }));
 
 let auth;
 let loginEvents;
@@ -31,31 +30,31 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-test("coalesces login and verifies a fresh native session before notifying listeners", async () => {
+test("coalesces native login without an extra request and invalidates the previous account", async () => {
+	request.mockResolvedValueOnce(new Response(JSON.stringify({ id: 7 })));
+	await auth.getLoggedInUser();
+	request.mockClear();
+	request.mockRejectedValue(new Error("Offline after native sign-in"));
 	const completed = vi.fn();
 	loginEvents.addListener(completed);
-	request.mockResolvedValue(new Response(JSON.stringify({ id: 7, name: "Reviewer" })));
 	const first = auth.login();
 	const second = auth.login();
 	expect(exec).toHaveBeenCalledTimes(1);
 	exec.mock.calls[0][0]();
 	await Promise.all([first, second]);
 	expect(completed).toHaveBeenCalledOnce();
-	expect(request).toHaveBeenCalledWith("https://dev.acode.app/api/login", { credentials: "include", cache: "no-store" });
-	expect((await auth.getLoggedInUser()).id).toBe(7);
+	expect(request).not.toHaveBeenCalled();
+	expect(localStorage["cached-logged-in-user"]).toBeUndefined();
+	request.mockResolvedValue(new Response(JSON.stringify({ id: 8 })));
+	expect((await auth.getLoggedInUser()).id).toBe(8);
+	expect(request).toHaveBeenCalledWith("https://dev.acode.app/api/login", { cache: "no-store" });
 });
 
-test("a rejected session clears cached account state and never reports login success", async () => {
+test("a rejected account refresh clears cached account state", async () => {
 	request.mockResolvedValueOnce(new Response(JSON.stringify({ id: 7 })));
 	await auth.getLoggedInUser();
-	const completed = vi.fn();
-	loginEvents.addListener(completed);
 	request.mockImplementation(async () => new Response("{}", { status: 401 }));
-	const pending = auth.login();
-	const rejected = expect(pending).rejects.toThrow("Sign-in did not complete");
-	exec.mock.calls[0][0]();
-	await rejected;
-	expect(completed).not.toHaveBeenCalled();
+	expect(await auth.getLoggedInUser(true)).toBeNull();
 	expect(await auth.getLoggedInUser()).toBeNull();
 	expect(localStorage["cached-logged-in-user"]).toBeUndefined();
 });
@@ -83,14 +82,12 @@ test("preserves actionable native errors for every waiter and permits a new atte
 	await nextAttempt;
 });
 
-test("verification cannot fall back to an offline cached account", async () => {
+test("a forced account refresh cannot fall back to an offline cached account", async () => {
 	vi.spyOn(console, "error").mockImplementation(() => {});
 	localStorage.setItem("cached-logged-in-user", JSON.stringify({ id: 7 }));
 	request.mockRejectedValue(new Error("Connection failed"));
 	await expect(auth.getLoggedInUser()).resolves.toEqual({ id: 7 });
-	const pending = expect(auth.login()).rejects.toThrow("Connection failed");
-	exec.mock.calls[0][0]();
-	await pending;
+	await expect(auth.getLoggedInUser(true)).rejects.toThrow("Connection failed");
 });
 
 test("account settings use the authentication browser and refresh after it closes", async () => {
