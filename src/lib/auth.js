@@ -55,8 +55,12 @@ class AuthService {
 			}
 			this.#loginCallbacks.clear();
 		});
+		document.addEventListener("pause", () => {
+			clearTimeout(this.#loginTimeout);
+		});
 		document.addEventListener("resume", () => {
 			clearTimeout(this.#loginTimeout);
+			if (!this.#loginCallbacks.size) return;
 			this.#loginTimeout = setTimeout(() => {
 				for (const callback of this.#loginCallbacks) {
 					callback.reject(new Error("Sign-in timed out. Please try again."));

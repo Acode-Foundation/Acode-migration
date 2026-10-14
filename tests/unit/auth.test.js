@@ -59,6 +59,32 @@ test("a rejected account refresh clears cached account state", async () => {
 	expect(localStorage["cached-logged-in-user"]).toBeUndefined();
 });
 
+test("an idle resume cannot time out a later browser sign-in", async () => {
+	document.dispatchEvent(new Event("resume"));
+	await vi.advanceTimersByTimeAsync(50_000);
+	const completed = vi.fn();
+	loginEvents.addListener(completed);
+	const pending = auth.login();
+	const outcome = pending.then(() => "success", (error) => error.message);
+	await vi.advanceTimersByTimeAsync(20_000);
+	exec.mock.calls[0][0]();
+	expect(await outcome).toBe("success");
+	expect(completed).toHaveBeenCalledOnce();
+});
+
+test("returning to the browser cancels the resume deadline until the next return", async () => {
+	const pending = auth.login();
+	const outcome = pending.then(() => "success", (error) => error.message);
+	document.dispatchEvent(new Event("resume"));
+	await vi.advanceTimersByTimeAsync(30_000);
+	document.dispatchEvent(new Event("pause"));
+	await vi.advanceTimersByTimeAsync(90_000);
+	document.dispatchEvent(new Event("resume"));
+	exec.mock.calls[0][0]();
+	expect(await outcome).toBe("success");
+	await vi.advanceTimersByTimeAsync(60_000);
+});
+
 test("preserves actionable native errors for every waiter and permits a new attempt", async () => {
 	vi.spyOn(console, "error").mockImplementation(() => {});
 	const message = "Too many sign-in attempts. Please wait 2 minutes and try again.";
