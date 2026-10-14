@@ -1,7 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-vi.mock("../../src/lib/config", () => ({ default: { BASE_URL: "https://dev.acode.app", API_BASE: "https://dev.acode.app/api" } }));
-
 let auth;
 let loginEvents;
 let exec;
@@ -40,6 +38,7 @@ test("coalesces native login without an extra request and invalidates the previo
 	const first = auth.login();
 	const second = auth.login();
 	expect(exec).toHaveBeenCalledTimes(1);
+	expect(exec.mock.calls[0].slice(2)).toEqual(["Authenticator", "login", [{ baseUrl: "https://acode.app", appVersionCode: 1016 }]]);
 	exec.mock.calls[0][0]();
 	await Promise.all([first, second]);
 	expect(completed).toHaveBeenCalledOnce();
@@ -47,7 +46,7 @@ test("coalesces native login without an extra request and invalidates the previo
 	expect(localStorage["cached-logged-in-user"]).toBeUndefined();
 	request.mockResolvedValue(new Response(JSON.stringify({ id: 8 })));
 	expect((await auth.getLoggedInUser()).id).toBe(8);
-	expect(request).toHaveBeenCalledWith("https://dev.acode.app/api/login", { cache: "no-store" });
+	expect(request).toHaveBeenCalledWith("https://acode.app/api/login", { cache: "no-store" });
 });
 
 test("a rejected account refresh clears cached account state", async () => {
@@ -82,7 +81,6 @@ test("returning to the browser cancels the resume deadline until the next return
 	document.dispatchEvent(new Event("resume"));
 	exec.mock.calls[0][0]();
 	expect(await outcome).toBe("success");
-	await vi.advanceTimersByTimeAsync(60_000);
 });
 
 test("preserves actionable native errors for every waiter and permits a new attempt", async () => {
@@ -120,7 +118,7 @@ test("account settings use the authentication browser and refresh after it close
 	request.mockResolvedValue(new Response("{}", { status: 401 }));
 	const pending = auth.openAccount();
 	const [closed, , service, action, args] = exec.mock.calls[0];
-	expect([service, action, args]).toEqual(["Authenticator", "openAccount", [{ baseUrl: "https://dev.acode.app" }]]);
+	expect([service, action, args]).toEqual(["Authenticator", "openAccount", [{ baseUrl: "https://acode.app" }]]);
 	expect(request).not.toHaveBeenCalled();
 	closed();
 	await expect(pending).resolves.toBeNull();

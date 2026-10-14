@@ -61,6 +61,7 @@ class AuthService {
 		document.addEventListener("resume", () => {
 			clearTimeout(this.#loginTimeout);
 			if (!this.#loginCallbacks.size) return;
+			// Browser sign-in can take minutes; only bound the handoff back to Acode.
 			this.#loginTimeout = setTimeout(() => {
 				for (const callback of this.#loginCallbacks) {
 					callback.reject(new Error("Sign-in timed out. Please try again."));
