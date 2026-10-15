@@ -4,8 +4,10 @@ import formatDownloadProgress from "../../src/lib/downloadProgress.js";
 test("falls back to the label when the total is unknown", () => {
 	expect(formatDownloadProgress(50, 0, "Loading")).toBe("Loading");
 	expect(formatDownloadProgress(50, undefined, "Loading")).toBe("Loading");
-	expect(formatDownloadProgress(50, NaN, "Loading")).toBe("Loading");
-	expect(formatDownloadProgress(50, Infinity, "Loading")).toBe("Loading");
+	expect(formatDownloadProgress(50, Number.NaN, "Loading")).toBe("Loading");
+	expect(formatDownloadProgress(50, Number.POSITIVE_INFINITY, "Loading")).toBe(
+		"Loading",
+	);
 });
 
 test("formats the percentage when the total is known", () => {

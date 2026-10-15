@@ -128,22 +128,22 @@ describe("actionStack app exit", () => {
 		expect(mocks.exitApp).toHaveBeenCalledOnce();
 	});
 
-	it.each([false, true])(
-		"does not start an exit flow on iOS (confirmation: %s)",
-		async (confirmOnExit) => {
-			mocks.platform.appExit = false;
-			mocks.settings.value.confirmOnExit = confirmOnExit;
-			mocks.confirm.mockResolvedValue(true);
-			const onClose = vi.fn();
-			actionStack.onCloseApp = onClose;
+	it.each([
+		false,
+		true,
+	])("does not start an exit flow on iOS (confirmation: %s)", async (confirmOnExit) => {
+		mocks.platform.appExit = false;
+		mocks.settings.value.confirmOnExit = confirmOnExit;
+		mocks.confirm.mockResolvedValue(true);
+		const onClose = vi.fn();
+		actionStack.onCloseApp = onClose;
 
-			await actionStack.pop();
+		await actionStack.pop();
 
-			expect(mocks.confirm).not.toHaveBeenCalled();
-			expect(onClose).not.toHaveBeenCalled();
-			expect(mocks.exitApp).not.toHaveBeenCalled();
-		},
-	);
+		expect(mocks.confirm).not.toHaveBeenCalled();
+		expect(onClose).not.toHaveBeenCalled();
+		expect(mocks.exitApp).not.toHaveBeenCalled();
+	});
 
 	it("still dismisses stacked pages on iOS", async () => {
 		mocks.platform.appExit = false;

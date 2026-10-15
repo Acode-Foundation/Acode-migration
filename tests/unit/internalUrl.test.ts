@@ -39,18 +39,20 @@ afterEach(() => vi.unstubAllGlobals());
 const external = `file:///storage/emulated/0/Android/data/${PKG}/files`;
 
 it("formats files and directories like Android's shortest-match resolver", () => {
-	expect(toInternalURL(fileSystems, `${external}/plugins/acode.git/main.js`)).toBe(
+	expect(
+		toInternalURL(fileSystems, `${external}/plugins/acode.git/main.js`),
+	).toBe(
 		"https://localhost/__cdvfile_files-external__/plugins/acode.git/main.js",
 	);
-	expect(toInternalURL(fileSystems, `${external}/plugins/acode.git`, true)).toBe(
-		"https://localhost/__cdvfile_files-external__/plugins/acode.git/",
-	);
+	expect(
+		toInternalURL(fileSystems, `${external}/plugins/acode.git`, true),
+	).toBe("https://localhost/__cdvfile_files-external__/plugins/acode.git/");
 	expect(
 		toInternalURL(fileSystems, `file:///data/user/0/${PKG}/cache/x.json`),
 	).toBe("https://localhost/__cdvfile_cache__/x.json");
-	expect(toInternalURL(fileSystems, "file:///storage/emulated/0/My Code/a.js")).toBe(
-		"https://localhost/__cdvfile_sdcard__/My%20Code/a.js",
-	);
+	expect(
+		toInternalURL(fileSystems, "file:///storage/emulated/0/My Code/a.js"),
+	).toBe("https://localhost/__cdvfile_sdcard__/My%20Code/a.js");
 });
 
 it("defers to the native resolver when the result could differ", () => {
@@ -80,5 +82,7 @@ it("defers when a root matches only as a string prefix of a sibling", () => {
 			nativeURL: "file:///storage/emulated/0/Doc/",
 		}),
 	);
-	expect(toInternalURL(fileSystems, "file:///storage/emulated/0/Docs/a.js")).toBeNull();
+	expect(
+		toInternalURL(fileSystems, "file:///storage/emulated/0/Docs/a.js"),
+	).toBeNull();
 });
