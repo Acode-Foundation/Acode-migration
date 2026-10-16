@@ -1,6 +1,6 @@
 import fs from "node:fs";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { Window } from "happy-dom";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 const source = fs.readFileSync(
 	new URL("../../platforms/ios/runner/WebContextMenu.swift", import.meta.url),

@@ -31,7 +31,9 @@ test("patchProjectFile syncs version, versionCode, bundle ids and display name",
 	expect(content).toContain("MARKETING_VERSION = 2.3.4;");
 	expect(content).toContain("CURRENT_PROJECT_VERSION = 99;");
 	expect(content).toContain("PRODUCT_BUNDLE_IDENTIFIER = com.example.app;");
-	expect(content).toContain("PRODUCT_BUNDLE_IDENTIFIER = com.example.app.tests;");
+	expect(content).toContain(
+		"PRODUCT_BUNDLE_IDENTIFIER = com.example.app.tests;",
+	);
 	expect(content).toContain(
 		'PRODUCT_BUNDLE_IDENTIFIER = "com.example.app.ui-tests";',
 	);

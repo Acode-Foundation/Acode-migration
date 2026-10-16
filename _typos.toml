@@ -57,5 +57,6 @@ multline = "multline"
 sav = "sav"
 ist = "ist"
 Hel = "Hel"
+edn = "edn"
 # Apple simulator device identifier
 udid = "udid"

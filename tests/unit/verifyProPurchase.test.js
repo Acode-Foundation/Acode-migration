@@ -12,42 +12,41 @@ function setup({ hasPro, cached = false }) {
 	const storage = new Map(cached ? [["acode_pro", "true"]] : []);
 	const config = { HAS_PRO: hasPro };
 	const setBannerSuppressed = vi.fn();
-	const { default: verifyProPurchase, PRO_CHECK_TIMEOUT_MS } =
-		loadSourceModule(
-			"src/lib/verifyProPurchase.js",
-			{
-				"utils/helpers": {
-					__esModule: true,
-					default: {
-						promisify: (fn) => new Promise((resolve) => fn(resolve)),
-					},
-				},
-				"./config": { __esModule: true, default: config },
-				"./platform": { __esModule: true, default: { isIOS: false } },
-				"./startAd": {
-					BANNER_SUPPRESSION_REASON: { PRO: "pro" },
-					setBannerSuppressed,
+	const { default: verifyProPurchase, PRO_CHECK_TIMEOUT_MS } = loadSourceModule(
+		"src/lib/verifyProPurchase.js",
+		{
+			"utils/helpers": {
+				__esModule: true,
+				default: {
+					promisify: (fn) => new Promise((resolve) => fn(resolve)),
 				},
 			},
-			{
-				setTimeout,
-				clearTimeout,
-				navigator: { onLine: true },
-				localStorage: {
-					getItem: (key) => storage.get(key) ?? null,
-					setItem: (key, value) => storage.set(key, value),
-					removeItem: (key) => storage.delete(key),
-				},
-				iap: {
-					PURCHASE_STATE_PURCHASED: 1,
-					startConnection: (resolve) => resolve(),
-					// The store answers whenever the test decides.
-					getPurchases: (resolve) => {
-						answer = resolve;
-					},
+			"./config": { __esModule: true, default: config },
+			"./platform": { __esModule: true, default: { isIOS: false } },
+			"./startAd": {
+				BANNER_SUPPRESSION_REASON: { PRO: "pro" },
+				setBannerSuppressed,
+			},
+		},
+		{
+			setTimeout,
+			clearTimeout,
+			navigator: { onLine: true },
+			localStorage: {
+				getItem: (key) => storage.get(key) ?? null,
+				setItem: (key, value) => storage.set(key, value),
+				removeItem: (key) => storage.delete(key),
+			},
+			iap: {
+				PURCHASE_STATE_PURCHASED: 1,
+				startConnection: (resolve) => resolve(),
+				// The store answers whenever the test decides.
+				getPurchases: (resolve) => {
+					answer = resolve;
 				},
 			},
-		);
+		},
+	);
 	const logger = { log: vi.fn() };
 	return {
 		config,

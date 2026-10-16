@@ -2,11 +2,11 @@
 
 import { EditorState } from "@codemirror/state";
 import { EditorView, type KeyBinding, keymap } from "@codemirror/view";
-import { afterEach, expect, test, vi } from "vitest";
 import {
 	createQuickToolKeyEvent,
 	runQuickToolKey,
 } from "cm/quickToolsNavigation";
+import { afterEach, expect, test, vi } from "vitest";
 
 vi.hoisted(() => {
 	Object.defineProperty(navigator, "platform", {
