@@ -120,4 +120,50 @@ final class AuthenticationTests: XCTestCase {
         let expired = HTTPURLResponse(url: url, statusCode: 400, httpVersion: nil, headerFields: nil)!
         XCTAssertEqual(AppAuthentication.exchangeFailure(expired).message, "Sign-in expired. Please try again.")
     }
+
+    func testAPIResponseCookiesPersistUpdateAndExpireWithoutReplacingAccountTokens() throws {
+        let name = "response-fixture-" + UUID().uuidString
+        defer {
+            for cookie in HTTPCookieStorage.shared.cookies ?? [] where cookie.name == name {
+                HTTPCookieStorage.shared.deleteCookie(cookie)
+            }
+        }
+        for host in AppAuthentication.hosts {
+            let origin = URL(string: "https://" + host)!
+            let url = origin.appendingPathComponent("api/cookie")
+            try auth.save("account-token", for: origin)
+            var source = URLRequest(url: URL(string: "acode://localhost/__api__/cookie")!)
+            source.setValue(origin.absoluteString, forHTTPHeaderField: "X-Acode-API-Origin")
+            source.setValue("include", forHTTPHeaderField: "X-Acode-Credentials")
+            let api = AppAPIHandler(auth: auth)
+            for (status, value) in [(200, "first"), (302, "updated")] {
+                let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: ["Set-Cookie": "\(name)=\(value); Path=/api; Secure; HttpOnly, token=response-token; Path=/; Secure"])!
+                let before = (HTTPCookieStorage.shared.cookies(for: url) ?? []).first { $0.name == name }?.value
+                AppAPIHandler.storeCookies(from: response, credentials: false)
+                XCTAssertEqual((HTTPCookieStorage.shared.cookies(for: url) ?? []).first { $0.name == name }?.value, before)
+                AppAPIHandler.storeCookies(from: response, credentials: true)
+                let cookie = (HTTPCookieStorage.shared.cookies(for: url) ?? []).first { $0.name == name }
+                XCTAssertEqual(cookie?.value, value)
+                XCTAssertEqual(cookie?.isHTTPOnly, true)
+                XCTAssertFalse((HTTPCookieStorage.shared.cookies(for: url) ?? []).contains { $0.name == "token" && $0.value == "response-token" })
+                let header = try api.request(for: source).value(forHTTPHeaderField: "Cookie") ?? ""
+                XCTAssertTrue(header.contains("\(name)=\(value)"))
+                XCTAssertTrue(header.contains("token=account-token"))
+            }
+            for expiry in ["Max-Age=0", "Expires=Thu, 01 Jan 1970 00:00:00 GMT"] {
+                let renewed = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: ["Set-Cookie": "\(name)=renewed; Path=/api; Secure"])!
+                AppAPIHandler.storeCookies(from: renewed, credentials: true)
+                let expired = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: ["Set-Cookie": "\(name)=; Path=/api; \(expiry); Secure"])!
+                AppAPIHandler.storeCookies(from: expired, credentials: false)
+                XCTAssertEqual((HTTPCookieStorage.shared.cookies(for: url) ?? []).first { $0.name == name }?.value, "renewed")
+                AppAPIHandler.storeCookies(from: expired, credentials: true)
+                XCTAssertFalse((HTTPCookieStorage.shared.cookies(for: url) ?? []).contains { $0.name == name })
+            }
+            XCTAssertEqual(try auth.token(for: origin), "account-token")
+        }
+        let foreign = URL(string: "https://untrusted.example/api/cookie")!
+        let response = HTTPURLResponse(url: foreign, statusCode: 200, httpVersion: nil, headerFields: ["Set-Cookie": "\(name)=foreign; Path=/"])!
+        AppAPIHandler.storeCookies(from: response, credentials: true)
+        XCTAssertFalse((HTTPCookieStorage.shared.cookies ?? []).contains { $0.name == name })
+    }
 }

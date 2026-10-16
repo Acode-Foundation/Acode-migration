@@ -63,6 +63,42 @@ final class SchemeRequestTests: XCTestCase {
             HTTPCookieStorage.shared.deleteCookie(cookie)
         }
     }
+
+    func testRedirectHookForwardsResponseCookieAndPreservesAccountToken() async throws {
+        let fixture = try HTTPFixture()
+        try await fixture.start()
+        defer { fixture.stop() }
+        var request = URLRequest(url: URL(string: fixture.origin + "/cookie-redirect")!)
+        request.httpShouldHandleCookies = false
+        request.setValue("token=account-fixture", forHTTPHeaderField: "Cookie")
+        let transport = HTTPTransport(request: request, followRedirects: true, connectTimeout: 5, readTimeout: 5)
+        defer { transport.cancel() }
+        let redirected = expectation(description: "Redirect cookie callback")
+        redirected.assertForOverFulfill = true
+        transport.onRedirect = { response, next in
+            XCTAssertEqual(response.statusCode, 302)
+            let header = try XCTUnwrap(response.value(forHTTPHeaderField: "Set-Cookie"))
+            let cookies = HTTPCookie.cookies(withResponseHeaderFields: ["Set-Cookie": header], for: try XCTUnwrap(response.url))
+            let cookie = try XCTUnwrap(HTTPCookie.requestHeaderFields(with: cookies)["Cookie"])
+            let account = try XCTUnwrap(next.value(forHTTPHeaderField: "Cookie"))
+            next.setValue(cookie + "; " + account, forHTTPHeaderField: "Cookie")
+            redirected.fulfill()
+        }
+        let data: Data = try await withCheckedThrowingContinuation { continuation in
+            var body = Data()
+            transport.onData = { body.append($0) }
+            transport.onComplete = { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume(returning: body) }
+            }
+            transport.start()
+        }
+        await fulfillment(of: [redirected], timeout: 1)
+        let headers = String(decoding: data, as: UTF8.self).components(separatedBy: "\r\n")
+        let header = try XCTUnwrap(headers.first { $0.lowercased().hasPrefix("cookie:") })
+        let cookies = Set(header.dropFirst("Cookie:".count).components(separatedBy: ";").map { $0.trimmingCharacters(in: .whitespaces) })
+        XCTAssertEqual(cookies, ["session=redirect-fixture", "token=account-fixture"])
+    }
 }
 
 private final class FixtureSchemeHandler: NSObject, WKURLSchemeHandler {

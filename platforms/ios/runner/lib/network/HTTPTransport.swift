@@ -6,6 +6,7 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
     var onData: (Data) throws -> Void = { _ in }
     var onComplete: (Error?) -> Void = { _ in }
     var allowRedirect: (URL) -> Bool = { _ in true }
+    var onRedirect: (HTTPURLResponse, inout URLRequest) throws -> Void = { _, _ in }
     private let request: URLRequest
     private let followRedirects: Bool
     private let connectTimeout: TimeInterval
@@ -88,6 +89,10 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
             completionHandler(nil); return
         }
         var redirect = request
+        if followRedirects {
+            do { try onRedirect(response, &redirect) }
+            catch { failure = error; completionHandler(nil); return }
+        }
         if request.url?.host != task.currentRequest?.url?.host || request.url?.scheme != task.currentRequest?.url?.scheme || request.url?.port != task.currentRequest?.url?.port {
             for header in ["Authorization", "Cookie", "Proxy-Authorization"] { redirect.setValue(nil, forHTTPHeaderField: header) }
         }
@@ -122,6 +127,6 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
         onComplete(error)
         session?.finishTasksAndInvalidate()
         session = nil; task = nil
-        onResponse = { _ in }; onData = { _ in }; onComplete = { _ in }
+        onResponse = { _ in }; onData = { _ in }; onComplete = { _ in }; onRedirect = { _, _ in }
     }
 }
