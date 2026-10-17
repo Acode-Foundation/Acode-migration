@@ -12,6 +12,7 @@ import android.widget.SeekBar;
 import android.widget.TextView;
 import com.foxdebug.acode.system.Ui;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 
 public class Emulator extends LinearLayout {
