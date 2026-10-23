@@ -242,7 +242,9 @@ public final class Harness {
 }
 `;
 
-const workDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "acode-archive-extractor-"));
+const workDirectory = fs.mkdtempSync(
+	path.join(os.tmpdir(), "acode-archive-extractor-"),
+);
 let toolchain = null;
 let toolchainError = null;
 let harness = null;
@@ -328,14 +330,19 @@ async function prepareToolchain() {
 
 	const jars = [];
 	for (const url of JAR_URLS) {
-		const target = path.join(jarsDirectory, path.basename(new URL(url).pathname));
+		const target = path.join(
+			jarsDirectory,
+			path.basename(new URL(url).pathname),
+		);
 		await download(url, target);
 		jars.push(target);
 	}
 
 	const extractorClasspath = jars.join(path.delimiter);
 	const sources = [
-		...Object.keys(ANDROID_STUBS).map((relative) => path.join(sourceDirectory, relative)),
+		...Object.keys(ANDROID_STUBS).map((relative) =>
+			path.join(sourceDirectory, relative),
+		),
 		path.join(sourceDirectory, "Harness.java"),
 		EXTRACTOR_SOURCE,
 	];
@@ -357,10 +364,14 @@ async function prepareToolchain() {
 }
 
 function runHarness({ classpath, runDirectory }) {
-	const result = spawnSync("java", ["-cp", classpath, "Harness", runDirectory], {
-		encoding: "utf8",
-		timeout: 60000,
-	});
+	const result = spawnSync(
+		"java",
+		["-cp", classpath, "Harness", runDirectory],
+		{
+			encoding: "utf8",
+			timeout: 60000,
+		},
+	);
 	if (result.status !== 0) {
 		throw new Error(`Harness failed: ${result.stderr || result.stdout}`);
 	}
@@ -372,9 +383,13 @@ async function download(url, target) {
 	let lastError = null;
 	for (let attempt = 0; attempt < attempts; attempt += 1) {
 		try {
-			const response = await fetch(url, { signal: AbortSignal.timeout(120000) });
+			const response = await fetch(url, {
+				signal: AbortSignal.timeout(120000),
+			});
 			if (!response.ok) {
-				throw new Error(`download of ${url} failed with status ${response.status}`);
+				throw new Error(
+					`download of ${url} failed with status ${response.status}`,
+				);
 			}
 			const bytes = Buffer.from(await response.arrayBuffer());
 			if (bytes.length === 0) {
@@ -427,6 +442,8 @@ function parseHarnessOutput(stdout) {
 
 function skipWithoutToolchain(context) {
 	if (toolchainError) {
-		context.skip(`archive extractor toolchain unavailable: ${toolchainError.message}`);
+		context.skip(
+			`archive extractor toolchain unavailable: ${toolchainError.message}`,
+		);
 	}
 }

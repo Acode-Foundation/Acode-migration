@@ -67,7 +67,10 @@ const generatedInitrc = () =>
 		.replace(/\/etc\/profile/g, "$TEST_ROOT/profile")
 		.replace(/\/etc\/bash\.bashrc/g, "$TEST_ROOT/bash.bashrc")
 		.replace(/\/etc\/skel\/\.bashrc/g, "$TEST_ROOT/skel.bashrc")
-		.replace(/\/usr\/share\/base-files\/dot\.bashrc/g, "$TEST_ROOT/skel.bashrc");
+		.replace(
+			/\/usr\/share\/base-files\/dot\.bashrc/g,
+			"$TEST_ROOT/skel.bashrc",
+		);
 
 const runInteractive = (name, input) => {
 	const home = path.join(HARNESS_ROOT, name, "home");

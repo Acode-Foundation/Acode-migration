@@ -200,7 +200,9 @@ describe("AXS lifecycle", () => {
 	it("reports a coded failure when the backend cannot spawn", async () => {
 		const { host, lifecycle } = createHarness();
 		host.behavior = async () => {
-			throw new Error("Failed to spawn bash: No viable candidates found in PATH");
+			throw new Error(
+				"Failed to spawn bash: No viable candidates found in PATH",
+			);
 		};
 
 		await expect(lifecycle.ensureReady()).rejects.toMatchObject({
@@ -241,9 +243,9 @@ describe("AXS lifecycle", () => {
 			return true;
 		};
 
-		await expect(
-			lifecycle.ensureReady({ allowAnyOrigin: true }),
-		).resolves.toBe(DEFAULT_AXS_PORT);
+		await expect(lifecycle.ensureReady({ allowAnyOrigin: true })).resolves.toBe(
+			DEFAULT_AXS_PORT,
+		);
 
 		expect(host.startCalls).toHaveLength(2);
 		expect(host.startCalls[0]?.allowAnyOrigin).toBe(true);

@@ -23,13 +23,19 @@ const fakes = {
 	dpkg: 'echo "$ACODE_TEST_ARCH"',
 	curl: 'echo "$@" >> "$ACODE_TEST_LOG"; cat "$ACODE_TEST_KEY"',
 	gpg: 'echo "$@" >> "$ACODE_TEST_LOG"; cat > "$ACODE_TEST_KEY_OUT"',
-	"apt-get": 'echo "$@" >> "$ACODE_TEST_LOG"; exit "${ACODE_TEST_APT_STATUS:-0}"',
+	"apt-get":
+		'echo "$@" >> "$ACODE_TEST_LOG"; exit "${ACODE_TEST_APT_STATUS:-0}"',
 	chmod: 'echo "$@" >> "$ACODE_TEST_LOG"',
 	grep: 'exec /usr/bin/grep "$@"',
 	awk: 'exec /usr/bin/awk "$@"',
 };
 
-const runSetup = ({ name, arch = "arm64", aptStatus = "0", existingSources = "" }) => {
+const runSetup = ({
+	name,
+	arch = "arm64",
+	aptStatus = "0",
+	existingSources = "",
+}) => {
 	const root = path.join(HARNESS_ROOT, name);
 	const bin = path.join(root, "bin");
 

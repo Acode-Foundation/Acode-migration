@@ -151,7 +151,11 @@ describe("rootfs artifacts", () => {
 	it("refreshes the scripts and artifacts on a normal launch", async () => {
 		// The launch path has to write them itself: nothing in the shell
 		// generates or version-checks them any more.
-		await Terminal.startAxs(false, () => {}, () => {});
+		await Terminal.startAxs(
+			false,
+			() => {},
+			() => {},
+		);
 
 		expect(writeFor(`${filesDir}/init-ubuntu.sh`)).toBeDefined();
 		expect(writeFor(`${filesDir}/ubuntu/initrc`)).toBeDefined();
