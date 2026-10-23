@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-	AxsLifecycle,
-	DEFAULT_AXS_PORT,
 	type AxsHealth,
 	type AxsHost,
+	AxsLifecycle,
 	type AxsStartOptions,
+	DEFAULT_AXS_PORT,
 } from "../../src/native/terminal/axsServer";
 
 interface FakeHost extends AxsHost {

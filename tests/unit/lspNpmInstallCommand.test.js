@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
 import { buildNpmInstallCommand } from "cm/lsp/installRuntime";
+import { describe, expect, it } from "vitest";
 
 describe("buildNpmInstallCommand", () => {
 	it("does not install Ubuntu's npm next to NodeSource's nodejs", () => {
