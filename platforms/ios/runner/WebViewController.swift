@@ -14,6 +14,7 @@ final class WebViewController: UIViewController {
     private var fullscreenLayout: [NSLayoutConstraint] = []
     var isFullscreenLayout: Bool { fullscreenLayout.first?.isActive == true }
     private var scrollObservation: NSKeyValueObservation?
+    private var contextMenu: WebContextMenu?
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -23,6 +24,7 @@ final class WebViewController: UIViewController {
         config.setURLSchemeHandler(AppURLSchemeHandler(), forURLScheme: "acode")
 
         let contentController = WKUserContentController()
+        WebShadowCaret.install(on: contentController)
         contentController.add(WeakScriptMessageHandler(bridge), name: "exec")
         config.userContentController = contentController
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
@@ -30,6 +32,7 @@ final class WebViewController: UIViewController {
 
         config.allowsInlineMediaPlayback = true
         webView = AppWebView(frame: .zero, configuration: config)
+        contextMenu = WebContextMenu(webView: webView)
         webView.navigationDelegate = self
         #if DEBUG
         webView.isInspectable = true

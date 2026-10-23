@@ -40,6 +40,7 @@ vi.mock("utils/helpers", () => ({
 			new Promise((resolve, reject) => fn(...args, resolve, reject)),
 	},
 }));
+
 import actionStack from "lib/actionStack";
 import selectAppIcon from "lib/appIconSelection";
 import restoreTheme from "lib/restoreTheme";
@@ -300,7 +301,10 @@ it("opens one complete grid and closes only after native success, preserving the
 	expect(h.loader.create).not.toHaveBeenCalled();
 	confirmSelection();
 	await vi.waitFor(() => expect(applied).toBeTypeOf("function"));
-	expect(h.loader.create).toHaveBeenCalledExactlyOnceWith("App icon", "Loading...");
+	expect(h.loader.create).toHaveBeenCalledExactlyOnceWith(
+		"App icon",
+		"Loading...",
+	);
 	expect(h.dialog.inert).toBe(true);
 	expect(document.querySelector("#__loader button")).toBeNull();
 	await actionStack.pop();
@@ -568,7 +572,10 @@ it.each([
 	expect(mocks.settings.value.appIcon).toBe("pixel_party");
 });
 
-it.each([false, true])("leaves the Pro flow's loader under its own control with external checkout %s", async (external) => {
+it.each([
+	false,
+	true,
+])("leaves the Pro flow's loader under its own control with external checkout %s", async (external) => {
 	mocks.external = external;
 	const h = dialogHarness();
 	const title = external ? "Login" : "Remove ads";
@@ -581,7 +588,9 @@ it.each([false, true])("leaves the Pro flow's loader under its own control with 
 	expect(h.loader.create).toHaveBeenCalledExactlyOnceWith(title, "Loading...");
 	expect(h.loader.destroy).not.toHaveBeenCalled();
 	expect(h.dialog.inert).toBe(false);
-	expect(document.querySelector("#__loader .title").textContent.trim()).toBe(title);
+	expect(document.querySelector("#__loader .title").textContent.trim()).toBe(
+		title,
+	);
 	h.loader.destroy();
 	vi.runAllTimers();
 	await actionStack.pop();

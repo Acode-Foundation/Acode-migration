@@ -8,7 +8,10 @@ export {
 	LSPPlugin,
 	serverCompletionSource,
 } from "@codemirror/lsp-client";
-export { default as clientManager, lspCompletionEnabled } from "./clientManager";
+export {
+	default as clientManager,
+	lspCompletionEnabled,
+} from "./clientManager";
 export {
 	jumpToDeclaration,
 	jumpToDefinition,

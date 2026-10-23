@@ -40,10 +40,10 @@
 	"files": {
 		"includes": [
 			"src/**/*.js",
+			"src/**/*.ts",
 			"dev/**/*.js",
 			"src/lang/**/*.json",
-			"src/native/**/*.ts",
-			"src/platforms/**/*.ts",
+			"tests/**",
 			"!fastlane/**/*",
 			"!platforms/**/*"
 		]

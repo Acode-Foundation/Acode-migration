@@ -32,7 +32,10 @@ function setup() {
 				__esModule: true,
 				default: { toInternalUri: async (url) => url },
 			},
-			"utils/Url": { __esModule: true, default: { join: (...p) => p.join("/") } },
+			"utils/Url": {
+				__esModule: true,
+				default: { join: (...p) => p.join("/") },
+			},
 			"./config": { __esModule: true, default: {} },
 			"./startupLogBuffer": {
 				discardStartupLogs,
