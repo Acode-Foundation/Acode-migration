@@ -30,6 +30,7 @@ final class PluginWebView: NSObject, WKScriptMessageHandler {
         }
         controller.onTitleChanged = { [weak self] title in self?.event("titleChanged", data: ["title": title]) }
         let content = controller.webView.configuration.userContentController
+        WebShadowCaret.install(on: content)
         content.add(WeakScriptMessageHandler(self), name: "webviewMessage")
         content.addUserScript(WKUserScript(source: Self.messagingScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         if ready { controller.loadViewIfNeeded() }

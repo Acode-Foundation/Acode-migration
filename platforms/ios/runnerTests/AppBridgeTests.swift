@@ -4,6 +4,39 @@ import WebKit
 
 @MainActor
 final class AppBridgeTests: BridgeTestCase {
+    func testStartupIntentsWaitForTheEditorAndWarmIntentsArriveImmediately() async throws {
+        let webView = try await editorWebView()
+        defer { IncomingLinks.shared.reset(); webView.reload() }
+        let url = try XCTUnwrap(URL(string: "acode://plugin/install/cold.start.fixture"))
+        IncomingLinks.shared.reset()
+        IncomingLinks.shared.receive(url)
+        let early = try await webView.callAsyncJavaScript("""
+            document.body.classList.add('loading');
+            window.startupIntents = [];
+            const receive = intent => startupIntents.push(intent.data);
+            system.setIntentHandler(receive, error => { throw Error(error); });
+            system.getIntent(receive, error => { throw Error(error); });
+            await new Promise((resolve, reject) => Bridge.exec(resolve, reject, 'System', 'getArch', []));
+            await new Promise(resolve => setTimeout(resolve, 200));
+            return startupIntents;
+            """, arguments: [:], in: nil, contentWorld: .page) as? [String]
+        XCTAssertEqual(early, [])
+        let cold = try await webView.callAsyncJavaScript("""
+            document.body.classList.remove('loading');
+            for (let n = 0; n < 50 && !startupIntents.length; n++)
+                await new Promise(resolve => setTimeout(resolve, 100));
+            return startupIntents;
+            """, arguments: [:], in: nil, contentWorld: .page) as? [String]
+        XCTAssertEqual(cold, [url.absoluteString])
+        IncomingLinks.shared.receive(url)
+        let warm = try await webView.callAsyncJavaScript("""
+            for (let n = 0; n < 50 && startupIntents.length < 2; n++)
+                await new Promise(resolve => setTimeout(resolve, 100));
+            return startupIntents;
+            """, arguments: [:], in: nil, contentWorld: .page) as? [String]
+        XCTAssertEqual(warm, [url.absoluteString, url.absoluteString])
+    }
+
     func testUnsupportedAppActionsRejectForNativeAndLegacyPlugins() async throws {
         let webView = try await editorWebView()
         let errors = try await webView.callAsyncJavaScript("""

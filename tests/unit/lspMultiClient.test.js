@@ -1,16 +1,16 @@
 // @vitest-environment happy-dom
 
-import {CompletionContext} from "@codemirror/autocomplete";
-import {forEachDiagnostic} from "@codemirror/lint";
-import {Compartment} from "@codemirror/state";
-import {EditorView} from "@codemirror/view";
+import { CompletionContext } from "@codemirror/autocomplete";
+import { forEachDiagnostic } from "@codemirror/lint";
 import {
 	LSPClient,
 	LSPPlugin,
-	Workspace,
 	serverCompletionSource,
 	serverDiagnostics,
+	Workspace,
 } from "@codemirror/lsp-client";
+import { Compartment } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
 import {
 	getLspDiagnostics,
 	lspDiagnosticsAutoSyncExtension,
@@ -18,7 +18,7 @@ import {
 	lspDiagnosticsUiExtension,
 	schedulePullDiagnostics,
 } from "cm/lsp/diagnostics";
-import {afterEach, describe, expect, it, vi} from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 // The editor loads the LSP client lazily; here it is always present.
 vi.mock("cm/lsp/clientLoader", async () => {
@@ -78,14 +78,16 @@ class TestWorkspace extends Workspace {
 			file.doc = changes.apply(prevDoc);
 			file.version++;
 			plugin.clear();
-			updates.push({file, prevDoc, changes});
+			updates.push({ file, prevDoc, changes });
 		}
 		return updates;
 	}
 }
 
 function client() {
-	return new LSPClient({workspace: (lspClient) => new TestWorkspace(lspClient)});
+	return new LSPClient({
+		workspace: (lspClient) => new TestWorkspace(lspClient),
+	});
 }
 
 function editor(doc, extensions) {
@@ -104,10 +106,10 @@ describe("multiple LSP clients on one editor", () => {
 		const supplemental = client();
 		const bindings = new Compartment();
 		const uri = "file:///workspace/example.ts";
-		const primaryBinding = primary.plugin(uri, "typescript", {priority: 100});
+		const primaryBinding = primary.plugin(uri, "typescript", { priority: 100 });
 		const supplementalBinding = supplemental.plugin(uri, "typescript", {
 			priority: 20,
-			features: {formatting: false, rename: false},
+			features: { formatting: false, rename: false },
 		});
 		const view = editor(
 			"const value = 1",
@@ -121,23 +123,29 @@ describe("multiple LSP clients on one editor", () => {
 		expect(LSPPlugin.getForFeature(view, "formatting")?.client).toBe(primary);
 		expect(LSPPlugin.get(view, supplemental)?.client).toBe(supplemental);
 
-		view.dispatch({changes: {from: view.state.doc.length, insert: ";"}});
+		view.dispatch({ changes: { from: view.state.doc.length, insert: ";" } });
 		const firstText = view.state.doc.toString();
-		expect(LSPPlugin.get(view, primary).unsyncedChanges.apply(
-			primary.workspace.files[0].doc,
-		).toString()).toBe(firstText);
-		expect(LSPPlugin.get(view, supplemental).unsyncedChanges.apply(
-			supplemental.workspace.files[0].doc,
-		).toString()).toBe(firstText);
+		expect(
+			LSPPlugin.get(view, primary)
+				.unsyncedChanges.apply(primary.workspace.files[0].doc)
+				.toString(),
+		).toBe(firstText);
+		expect(
+			LSPPlugin.get(view, supplemental)
+				.unsyncedChanges.apply(supplemental.workspace.files[0].doc)
+				.toString(),
+		).toBe(firstText);
 
 		expect(primary.workspace.syncFiles()).toHaveLength(1);
 		expect(LSPPlugin.get(view, primary).unsyncedChanges.empty).toBe(true);
 		expect(LSPPlugin.get(view, supplemental).unsyncedChanges.empty).toBe(false);
 
-		view.dispatch({changes: {from: 0, insert: "export "}});
-		expect(LSPPlugin.get(view, supplemental).unsyncedChanges.apply(
-			supplemental.workspace.files[0].doc,
-		).toString()).toBe(view.state.doc.toString());
+		view.dispatch({ changes: { from: 0, insert: "export " } });
+		expect(
+			LSPPlugin.get(view, supplemental)
+				.unsyncedChanges.apply(supplemental.workspace.files[0].doc)
+				.toString(),
+		).toBe(view.state.doc.toString());
 		expect(supplemental.workspace.syncFiles()).toHaveLength(1);
 		expect(LSPPlugin.get(view, supplemental).unsyncedChanges.empty).toBe(true);
 
@@ -158,21 +166,27 @@ describe("multiple LSP clients on one editor", () => {
 		const primary = client();
 		const supplemental = client();
 		const failing = client();
-		primary.serverCapabilities = {completionProvider: {}};
-		supplemental.serverCapabilities = {completionProvider: {}};
-		failing.serverCapabilities = {completionProvider: {}};
+		primary.serverCapabilities = { completionProvider: {} };
+		supplemental.serverCapabilities = { completionProvider: {} };
+		failing.serverCapabilities = { completionProvider: {} };
 		primary.sync = vi.fn();
 		supplemental.sync = vi.fn();
 		failing.sync = vi.fn();
-		primary.request = vi.fn().mockResolvedValue([
-			{label: "typescriptItem", detail: "TypeScript"},
-			{label: "sharedItem"},
-		]);
-		supplemental.request = vi.fn().mockResolvedValue([
-			{label: "tailwindItem", detail: "Tailwind CSS"},
-			{label: "sharedItem"},
-		]);
-		failing.request = vi.fn().mockRejectedValue(new Error("server unavailable"));
+		primary.request = vi
+			.fn()
+			.mockResolvedValue([
+				{ label: "typescriptItem", detail: "TypeScript" },
+				{ label: "sharedItem" },
+			]);
+		supplemental.request = vi
+			.fn()
+			.mockResolvedValue([
+				{ label: "tailwindItem", detail: "Tailwind CSS" },
+				{ label: "sharedItem" },
+			]);
+		failing.request = vi
+			.fn()
+			.mockRejectedValue(new Error("server unavailable"));
 
 		const view = editor("di", [
 			primary.plugin("file:///workspace/example.tsx", "typescriptreact", {
@@ -203,30 +217,34 @@ describe("multiple LSP clients on one editor", () => {
 		expect(failing.request).toHaveBeenCalledOnce();
 		expect(warn).toHaveBeenCalledWith(
 			"[lsp] Completion provider failed",
-			expect.objectContaining({message: "server unavailable"}),
+			expect.objectContaining({ message: "server unavailable" }),
 		);
 	});
 
 	it("does not query a client when completion is disabled for its binding", async () => {
 		const primary = client();
 		const diagnosticsOnly = client();
-		primary.serverCapabilities = {completionProvider: {}};
-		diagnosticsOnly.serverCapabilities = {completionProvider: {}};
+		primary.serverCapabilities = { completionProvider: {} };
+		diagnosticsOnly.serverCapabilities = { completionProvider: {} };
 		primary.sync = vi.fn();
 		diagnosticsOnly.sync = vi.fn();
-		primary.request = vi.fn().mockResolvedValue([{label: "primaryItem"}]);
-		diagnosticsOnly.request = vi.fn().mockResolvedValue([{label: "wrongItem"}]);
+		primary.request = vi.fn().mockResolvedValue([{ label: "primaryItem" }]);
+		diagnosticsOnly.request = vi
+			.fn()
+			.mockResolvedValue([{ label: "wrongItem" }]);
 		const view = editor("x", [
 			primary.plugin("file:///workspace/example.ts", "typescript"),
 			diagnosticsOnly.plugin("file:///workspace/example.ts", "typescript", {
-				features: {completion: false},
+				features: { completion: false },
 			}),
 		]);
 
 		const result = await serverCompletionSource(
 			new CompletionContext(view.state, 1, true, view),
 		);
-		expect(result.options.map((option) => option.label)).toEqual(["primaryItem"]);
+		expect(result.options.map((option) => option.label)).toEqual([
+			"primaryItem",
+		]);
 		expect(diagnosticsOnly.request).not.toHaveBeenCalled();
 	});
 
@@ -247,8 +265,8 @@ describe("multiple LSP clients on one editor", () => {
 			message,
 			severity: 2,
 			range: {
-				start: {line: 0, character},
-				end: {line: 0, character: character + 1},
+				start: { line: 0, character },
+				end: { line: 0, character: character + 1 },
 			},
 		});
 
@@ -286,7 +304,7 @@ describe("multiple LSP clients on one editor", () => {
 		const view = editor("const x = 1", [
 			enabled.plugin(uri, "typescript"),
 			disabled.plugin(uri, "typescript", {
-				features: {diagnostics: false},
+				features: { diagnostics: false },
 			}),
 			lspDiagnosticsAutoSyncExtension(),
 		]);
@@ -295,7 +313,7 @@ describe("multiple LSP clients on one editor", () => {
 		expect(enabled.sync).toHaveBeenCalledOnce();
 		expect(disabled.sync).not.toHaveBeenCalled();
 
-		view.dispatch({changes: {from: view.state.doc.length, insert: ";"}});
+		view.dispatch({ changes: { from: view.state.doc.length, insert: ";" } });
 		await vi.advanceTimersByTimeAsync(500);
 		expect(enabled.sync).toHaveBeenCalledTimes(2);
 		expect(disabled.sync).not.toHaveBeenCalled();
@@ -303,12 +321,12 @@ describe("multiple LSP clients on one editor", () => {
 
 	it("rejects pull and push diagnostics from a disabled provider", () => {
 		const disabled = client();
-		disabled.serverCapabilities = {diagnosticProvider: {}};
+		disabled.serverCapabilities = { diagnosticProvider: {} };
 		disabled.request = vi.fn();
 		const uri = "file:///workspace/example.ts";
 		const view = editor("const x = 1", [
 			disabled.plugin(uri, "typescript", {
-				features: {diagnostics: false},
+				features: { diagnostics: false },
 			}),
 			lspDiagnosticsUiExtension(false),
 		]);
@@ -328,8 +346,8 @@ describe("multiple LSP clients on one editor", () => {
 					message: "must stay hidden",
 					severity: 2,
 					range: {
-						start: {line: 0, character: 6},
-						end: {line: 0, character: 7},
+						start: { line: 0, character: 6 },
+						end: { line: 0, character: 7 },
 					},
 				},
 			],

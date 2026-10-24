@@ -45,3 +45,22 @@
     transform: translate(0, -100%, 0);
   }
 }
+
+html[data-platform="ios"] #search-bar {
+  input {
+    // Hide WebKit's native caret while the focused search field is moving.
+    animation-name: hide-search-caret;
+    animation-duration: inherit;
+  }
+
+  &.hide input {
+    caret-color: transparent;
+  }
+}
+
+@keyframes hide-search-caret {
+  from,
+  to {
+    caret-color: transparent;
+  }
+}

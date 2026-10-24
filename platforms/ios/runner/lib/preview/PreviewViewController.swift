@@ -31,6 +31,7 @@ final class PreviewViewController: UIViewController {
     weak var activeDialog: UIAlertController?
     private(set) var isClosed = false
     private var observations: [NSKeyValueObservation] = []
+    private var contextMenu: WebContextMenu?
 
     init(url: URL, theme: [String: Any], console: Bool) {
         initialURL = url
@@ -42,6 +43,7 @@ final class PreviewViewController: UIViewController {
         configuration.preferences.isElementFullscreenEnabled = true
         webView = WKWebView(frame: .zero, configuration: configuration)
         super.init(nibName: nil, bundle: nil)
+        contextMenu = WebContextMenu(webView: webView)
         modalPresentationStyle = .fullScreen
     }
 

@@ -31,7 +31,13 @@ describe("appIcons", () => {
 		);
 		const window = new Window();
 		const config = new window.DOMParser().parseFromString(
-			fs.readFileSync(new URL("../../platforms/android/app/src/main/AndroidManifest.xml", import.meta.url), "utf8"),
+			fs.readFileSync(
+				new URL(
+					"../../platforms/android/app/src/main/AndroidManifest.xml",
+					import.meta.url,
+				),
+				"utf8",
+			),
 			"application/xml",
 		);
 		expect(

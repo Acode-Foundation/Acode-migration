@@ -1,6 +1,6 @@
 import toast from "components/toast";
 import confirm from "dialogs/confirm";
-import { createTransport } from "../transport";
+import { isBuiltinUbuntuAccessible } from "../runtimeProviders";
 import {
 	checkServerInstallation,
 	ensureServerRunning,
@@ -9,12 +9,12 @@ import {
 	installServer,
 	uninstallServer,
 } from "../serverLauncher";
-import { isBuiltinUbuntuAccessible } from "../runtimeProviders";
+import { createTransport } from "../transport";
 import type {
 	LspRuntimeContext,
 	LspRuntimeProvider,
-	LspServerDefinition,
 	LspRuntimeUriResolutionContext,
+	LspServerDefinition,
 } from "../types";
 
 export const BUILTIN_UBUNTU_RUNTIME_ID = "builtin-ubuntu";
@@ -52,10 +52,7 @@ export const builtinUbuntuRuntimeProvider: LspRuntimeProvider = {
 	label: "Built-in Ubuntu",
 	priority: -100,
 
-	canHandle(
-		server: LspServerDefinition,
-		context: LspRuntimeContext,
-	): boolean {
+	canHandle(server: LspServerDefinition, context: LspRuntimeContext): boolean {
 		if (context.runtimeAction && server.launcher) {
 			return true;
 		}

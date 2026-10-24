@@ -10,28 +10,28 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-test.each(["com.foxdebug.acode", "com.foxdebug.acodefree"])(
-	"launches %s using the shared activity namespace",
-	(targetId) => {
-		const spawn = vi
-			.spyOn(childProcess, "spawnSync")
-			.mockReturnValue({ status: 0 });
-		delete require.cache[scriptPath];
-		const { launch } = require(scriptPath);
+test.each([
+	"com.foxdebug.acode",
+	"com.foxdebug.acodefree",
+])("launches %s using the shared activity namespace", (targetId) => {
+	const spawn = vi
+		.spyOn(childProcess, "spawnSync")
+		.mockReturnValue({ status: 0 });
+	delete require.cache[scriptPath];
+	const { launch } = require(scriptPath);
 
-		launch({ targetId, target: "device" }, "/tmp/app-debug.apk");
+	launch({ targetId, target: "device" }, "/tmp/app-debug.apk");
 
-		expect(spawn.mock.calls.map(([, args]) => args)).toEqual([
-			["-s", "device", "install", "-r", "/tmp/app-debug.apk"],
-			[
-				"-s",
-				"device",
-				"shell",
-				"am",
-				"start",
-				"-n",
-				`${targetId}/com.foxdebug.acode.MainActivity`,
-			],
-		]);
-	},
-);
+	expect(spawn.mock.calls.map(([, args]) => args)).toEqual([
+		["-s", "device", "install", "-r", "/tmp/app-debug.apk"],
+		[
+			"-s",
+			"device",
+			"shell",
+			"am",
+			"start",
+			"-n",
+			`${targetId}/com.foxdebug.acode.MainActivity`,
+		],
+	]);
+});

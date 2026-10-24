@@ -1,10 +1,10 @@
 import type { LSPClient } from "@codemirror/lsp-client";
-import { getAllLspPlugins } from "./lsp/clientLoader";
 import type { Range } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType } from "@codemirror/view";
 import pickColor from "dialogs/color";
 import color from "utils/color";
 import type { Color as LspColor } from "vscode-languageserver-types";
+import { getAllLspPlugins } from "./lsp/clientLoader";
 
 export const COLOR_CHIP_CLASS = "cm-color-chip";
 export const COLOR_CHIP_SOURCE_ATTR = "data-color-source";
@@ -96,8 +96,7 @@ export function isViewEditable(view: EditorView): boolean {
 export function hasLspColorProvider(view: EditorView): boolean {
 	return getAllLspPlugins(view, "documentColor").some(
 		(lsp) =>
-			lsp.client.connected &&
-			!!lsp.client.serverCapabilities?.colorProvider,
+			lsp.client.connected && !!lsp.client.serverCapabilities?.colorProvider,
 	);
 }
 

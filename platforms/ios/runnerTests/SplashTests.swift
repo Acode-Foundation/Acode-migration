@@ -26,7 +26,8 @@ final class SplashTests: BridgeTestCase {
         let originalColor = try await webView.evaluateJavaScript("localStorage.getItem('__primary_color')")
         let storage = String(data: try JSONSerialization.data(withJSONObject: [originalColor]), encoding: .utf8)!
         let scripts = webView.configuration.userContentController
-        let originalScripts = scripts.userScripts
+        // WebKit's bridged array changes when scripts are removed; materialize a snapshot.
+        let originalScripts = scripts.userScripts.map { $0 }
         defer {
             scripts.removeAllUserScripts()
             originalScripts.forEach(scripts.addUserScript)
