@@ -6,11 +6,22 @@ import android.os.Build;
 import java.io.*;
 import java.util.Map;
 import java.util.TimeZone;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
 public class ProcessManager {
+
+    /**
+     * Upper bound for a single command. Without it a child that never closes its
+     * pipes (a daemon inheriting stderr) blocks the calling thread forever.
+     */
+    private static final long COMMAND_TIMEOUT_MINUTES = 15;
     
     private final Context context;
     public static boolean prootDebug = false;
@@ -22,11 +33,11 @@ public class ProcessManager {
     /**
      * Creates a ProcessBuilder with common environment setup
      */
-    public ProcessBuilder createProcessBuilder(String cmd, boolean useAlpine) {
-        if (useAlpine) {
+    public ProcessBuilder createProcessBuilder(String cmd, boolean useUbuntu) {
+        if (useUbuntu) {
             refreshAxsSymlink();
         }
-        String xcmd = useAlpine ? "source $PREFIX/init-sandbox.sh " + cmd : cmd;
+        String xcmd = useUbuntu ? "source $PREFIX/init-sandbox.sh " + cmd : cmd;
         ProcessBuilder builder = new ProcessBuilder("sh", "-c", xcmd);
         setupEnvironment(builder.environment());
         return builder;
@@ -112,15 +123,55 @@ public class ProcessManager {
     /**
      * Executes a command and returns the result
      */
-    public ExecResult executeCommand(String cmd, boolean useAlpine) throws Exception {
-        ProcessBuilder builder = createProcessBuilder(cmd, useAlpine);
+    public ExecResult executeCommand(String cmd, boolean useUbuntu) throws Exception {
+        ProcessBuilder builder = createProcessBuilder(cmd, useUbuntu);
         Process process = builder.start();
-        
-        String stdout = readStream(process.getInputStream());
-        String stderr = readStream(process.getErrorStream());
-        int exitCode = process.waitFor();
-        
-        return new ExecResult(exitCode, stdout.trim(), stderr.trim());
+
+        // Both pipes must be drained concurrently. Reading stdout to EOF first
+        // deadlocks as soon as the child fills the stderr pipe buffer, which
+        // apt-get update/install does routinely.
+        ExecutorService drainers = Executors.newFixedThreadPool(2);
+        long deadline = System.currentTimeMillis() +
+            TimeUnit.MINUTES.toMillis(COMMAND_TIMEOUT_MINUTES);
+        try {
+            Future<String> stdoutFuture = drainers.submit(() -> readStream(process.getInputStream()));
+            Future<String> stderrFuture = drainers.submit(() -> readStream(process.getErrorStream()));
+            String stdout = stdoutFuture.get(remainingMillis(deadline), TimeUnit.MILLISECONDS);
+            String stderr = stderrFuture.get(remainingMillis(deadline), TimeUnit.MILLISECONDS);
+            int exitCode = process.waitFor();
+
+            return new ExecResult(exitCode, stdout.trim(), stderr.trim());
+        } catch (TimeoutException e) {
+            process.destroyForcibly();
+            closeQuietly(process.getInputStream());
+            closeQuietly(process.getErrorStream());
+            throw new IOException(
+                "Command timed out after " + COMMAND_TIMEOUT_MINUTES + " minutes: " + cmd,
+                e
+            );
+        } finally {
+            drainers.shutdownNow();
+        }
+    }
+
+    /**
+     * Remaining time before the command deadline, never below one millisecond so
+     * {@code Future#get} cannot be handed a non-positive timeout.
+     */
+    private static long remainingMillis(long deadline) {
+        return Math.max(1L, deadline - System.currentTimeMillis());
+    }
+
+    /**
+     * Closing a pipe unblocks a drainer that is still waiting on a grandchild
+     * holding the write end after the direct child was killed.
+     */
+    private static void closeQuietly(InputStream stream) {
+        try {
+            stream.close();
+        } catch (IOException ignored) {
+            // Nothing useful to do while reporting the timeout.
+        }
     }
     
     /**

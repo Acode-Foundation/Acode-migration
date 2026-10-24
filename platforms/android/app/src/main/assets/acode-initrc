@@ -1,0 +1,152 @@
+# ============================================================
+# Acode Ubuntu shell initialization
+# ============================================================
+
+# Load system profile
+if [ -f /etc/profile ]; then
+    source /etc/profile
+fi
+
+export PATH="$PATH:/bin:/sbin:/usr/bin:/usr/sbin:/usr/share/bin:/usr/share/sbin:/usr/local/bin:/usr/local/sbin"
+export HOME="/public"
+export TERM="xterm-256color"
+export SHELL="/bin/bash"
+
+# Allow pip to install packages into the system environment.
+export PIP_BREAK_SYSTEM_PACKAGES=1
+
+# ============================================================
+# Shorten current path
+# ~/project/src/components
+# becomes:
+# ~/p/s/components
+# ============================================================
+
+_shorten_path() {
+    local path="$PWD"
+
+    if [[ "$HOME" != "/" && "$path" == "$HOME" ]]; then
+        echo "~"
+        return
+    fi
+
+    if [[ "$HOME" != "/" && "$path" == "$HOME/"* ]]; then
+        path="~${path#$HOME}"
+    fi
+
+    [[ "$path" == "~" ]] && echo "~" && return
+
+    local parts
+    local result=""
+    local len
+
+    IFS='/' read -ra parts <<< "$path"
+
+    len=${#parts[@]}
+
+    for ((i=0; i<len; i++)); do
+        [[ -z "${parts[i]}" ]] && continue
+
+        if [[ "$i" -lt $((len - 1)) ]]; then
+            result+="${parts[i]:0:1}/"
+        else
+            result+="${parts[i]}"
+        fi
+    done
+
+    if [[ "$path" == /* ]]; then
+        echo "/$result"
+    else
+        echo "$result"
+    fi
+}
+
+# ============================================================
+# MOTD
+# ============================================================
+
+if [ -s /etc/acode_motd ]; then
+    cat /etc/acode_motd
+fi
+
+# ============================================================
+# Command-not-found handler
+# ============================================================
+
+command_not_found_handle() {
+    local cmd="$1"
+    local pkg=""
+
+    pkg="$(
+        apt-cache search "^${cmd}$" 2>/dev/null |
+        awk '{print $1}' |
+        head -n 1
+    )"
+
+    if [ -n "$pkg" ]; then
+        echo -e "The program '$cmd' is not installed.\nInstall it with:\n \e[1;32mapt install $pkg\e[0m" >&2
+    else
+        echo "The program '$cmd' is not installed and no package provides it." >&2
+    fi
+
+    return 127
+}
+
+# Termux-compatible behaviour
+alias clear='reset'
+
+# ============================================================
+# Prompt
+#
+# /etc/bash.bashrc colors its prompt for TERM=*-256color but the stock
+# ~/.bashrc does not, and the user's rc file is sourced last, so the colored
+# Acode prompt is written here and put back below unless the user's own rc
+# file replaced it with a prompt they wrote.
+#
+# _PS1_MARK reaches PS1 through a parameter expansion at prompt time, and bash
+# decodes \[, \] and \033 only in the literal PS1 string - the same sequences
+# coming out of a variable are printed verbatim. The failure marker therefore
+# carries the bytes those sequences stand for: ESC for the color, and \001 and
+# \002, which are what \[ and \] decode to, so readline still measures the
+# prompt as zero-width.
+# ============================================================
+
+ACODE_PS1='\[\033[1;32m\]\u\[\033[0m\]@localhost \[\033[1;34m\]$_PS1_PATH\[\033[0m\] ${_PS1_MARK:-$} '
+
+ACODE_MARK_FAILED="$(printf '\001\033[31m\002>$\001\033[0m\002')"
+
+PROMPT_COMMAND='_PS1_EXIT=$?; _PS1_PATH=$(_shorten_path); if [ "$_PS1_EXIT" -ne 0 ]; then _PS1_MARK="$ACODE_MARK_FAILED"; else _PS1_MARK="$"; fi'
+
+PS1="$ACODE_PS1"
+
+# ============================================================
+# User configuration
+# ============================================================
+
+if [ -f /etc/bash.bashrc ]; then
+    source /etc/bash.bashrc
+fi
+
+# Snapshot what the system rc files leave in PS1, and replay the stock
+# ~/.bashrc in a subshell: it installs its own plain prompt, which is still a
+# rootfs default rather than a user choice.
+_ACODE_ROOTFS_PS1="$PS1"
+_ACODE_STOCK_PS1=""
+for _stock in /etc/skel/.bashrc /usr/share/base-files/dot.bashrc; do
+    if [ -f "$_stock" ]; then
+        _ACODE_STOCK_PS1="$(source "$_stock" >/dev/null 2>&1; printf '%s' "$PS1")"
+        break
+    fi
+done
+
+if [ -f "$HOME/.bashrc" ]; then
+    source "$HOME/.bashrc"
+fi
+
+# A user prompt always wins; the rootfs defaults never do.
+if [ "$PS1" = "$_ACODE_ROOTFS_PS1" ] ||
+    [ "$PS1" = "${_ACODE_STOCK_PS1:-$_ACODE_ROOTFS_PS1}" ]; then
+    PS1="$ACODE_PS1"
+fi
+
+unset _ACODE_ROOTFS_PS1 _ACODE_STOCK_PS1 _stock ACODE_PS1

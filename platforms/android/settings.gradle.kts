@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "Acode"
 include(":app")
+include(":proot")
