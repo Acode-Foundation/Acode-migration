@@ -7,6 +7,7 @@ import {
 	runQuickToolKey,
 } from "cm/quickToolsNavigation";
 import { afterEach, expect, test, vi } from "vitest";
+import { queueSelectionChange } from "../helpers/queueSelectionChange";
 
 vi.hoisted(() => {
 	Object.defineProperty(navigator, "platform", {
@@ -22,6 +23,8 @@ vi.mock("utils/keyboardEvent", () => ({
 }));
 
 const views: EditorView[] = [];
+
+queueSelectionChange();
 
 afterEach(() => {
 	views.splice(0).forEach((view) => view.destroy());

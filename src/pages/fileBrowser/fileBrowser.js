@@ -81,12 +81,10 @@ function FileBrowserInclude(mode, info, doesOpenLast = true) {
 	let bypassSelectionForContextMenu = false;
 	let $selectAllCheckbox = null;
 
-	if (!info) {
-		if (mode !== "both") {
-			info = IS_FOLDER_MODE ? strings["open folder"] : strings["open file"];
-		} else {
-			info = strings["file browser"];
-		}
+	// In "both" mode the page title already says "File browser", so the
+	// info row is only shown when the caller passes its own note.
+	if (!info && mode !== "both") {
+		info = IS_FOLDER_MODE ? strings["open folder"] : strings["open file"];
 	}
 
 	return new Promise((resolve, reject) => {
@@ -211,6 +209,8 @@ function FileBrowserInclude(mode, info, doesOpenLast = true) {
 		if (IS_FOLDER_MODE) {
 			$openFolder = tag("button", {
 				className: "floating icon check",
+				title: strings["select folder"],
+				ariaLabel: strings["select folder"],
 				style: {
 					bottom: "10px",
 					top: "auto",
@@ -1344,7 +1344,7 @@ function FileBrowserInclude(mode, info, doesOpenLast = true) {
 					currentDir.url === "/" ? strings.remove : strings.delete;
 				const options = [
 					["delete", deleteText, "delete"],
-					["rename", strings.rename, "text_format"],
+					["rename", strings.rename, "edit"],
 				];
 
 				if (/s?ftp/.test(storageType)) {
@@ -1385,9 +1385,14 @@ function FileBrowserInclude(mode, info, doesOpenLast = true) {
 					}
 
 					case "rename": {
-						let newname = await prompt(strings.rename, name, "text", {
-							match: config.FILE_NAME_REGEX,
-						});
+						let newname = await prompt(
+							strings.rename,
+							name,
+							helpers.isFile(type) ? "filename" : "text",
+							{
+								match: config.FILE_NAME_REGEX,
+							},
+						);
 
 						newname = helpers.fixFilename(newname);
 						if (!newname || newname === name) break;

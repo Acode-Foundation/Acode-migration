@@ -735,6 +735,12 @@ preventSlideTests.push((target) => {
 	}
 });
 
+// Let the app icon rail scroll when plugins add more icons than fit
+preventSlideTests.push((target) => {
+	const $rail = target.closest?.(".app-icons-container");
+	return !!$rail && $rail.scrollHeight > $rail.clientHeight;
+});
+
 preventSlideTests.push((target) => {
 	return (
 		target instanceof HTMLInputElement ||
