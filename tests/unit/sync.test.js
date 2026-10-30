@@ -84,8 +84,12 @@ test("patchDisplayName syncs the name across native and web files", () => {
 
 	patchDisplayName({ displayName: "Example" });
 
-	expect(writes["runner/Info.plist"]).toContain("<key>CFBundleDisplayName</key>\n\t<string>Example</string>");
-	expect(writes["runner/Info.plist"]).toContain("<key>CFBundleName</key>\n\t<string>Example</string>");
+	expect(writes["runner/Info.plist"]).toContain(
+		"<key>CFBundleDisplayName</key>\n\t<string>Example</string>",
+	);
+	expect(writes["runner/Info.plist"]).toContain(
+		"<key>CFBundleName</key>\n\t<string>Example</string>",
+	);
 	expect(writes["values/strings.xml"]).toContain('name="app_name">Example<');
 	expect(writes["settings.gradle.kts"]).toContain(
 		'rootProject.name = "Example"',

@@ -11,9 +11,15 @@ beforeEach(async () => {
 	vi.stubGlobal("document", new EventTarget());
 	vi.stubGlobal("window", { BuildInfo: { versionCode: 1016 } });
 	vi.stubGlobal("localStorage", {
-		getItem(key) { return this[key] ?? null; },
-		setItem(key, value) { this[key] = value; },
-		removeItem(key) { delete this[key]; },
+		getItem(key) {
+			return this[key] ?? null;
+		},
+		setItem(key, value) {
+			this[key] = value;
+		},
+		removeItem(key) {
+			delete this[key];
+		},
 	});
 	exec = vi.fn();
 	request = vi.fn();
@@ -38,7 +44,11 @@ test("coalesces native login without an extra request and invalidates the previo
 	const first = auth.login();
 	const second = auth.login();
 	expect(exec).toHaveBeenCalledTimes(1);
-	expect(exec.mock.calls[0].slice(2)).toEqual(["Authenticator", "login", [{ baseUrl: "https://acode.app", appVersionCode: 1016 }]]);
+	expect(exec.mock.calls[0].slice(2)).toEqual([
+		"Authenticator",
+		"login",
+		[{ baseUrl: "https://acode.app", appVersionCode: 1016 }],
+	]);
 	exec.mock.calls[0][0]();
 	await Promise.all([first, second]);
 	expect(completed).toHaveBeenCalledOnce();
@@ -46,7 +56,9 @@ test("coalesces native login without an extra request and invalidates the previo
 	expect(localStorage["cached-logged-in-user"]).toBeUndefined();
 	request.mockResolvedValue(new Response(JSON.stringify({ id: 8 })));
 	expect((await auth.getLoggedInUser()).id).toBe(8);
-	expect(request).toHaveBeenCalledWith("https://acode.app/api/login", { cache: "no-store" });
+	expect(request).toHaveBeenCalledWith("https://acode.app/api/login", {
+		cache: "no-store",
+	});
 });
 
 test("a rejected account refresh clears cached account state", async () => {
@@ -64,7 +76,10 @@ test("an idle resume cannot time out a later browser sign-in", async () => {
 	const completed = vi.fn();
 	loginEvents.addListener(completed);
 	const pending = auth.login();
-	const outcome = pending.then(() => "success", (error) => error.message);
+	const outcome = pending.then(
+		() => "success",
+		(error) => error.message,
+	);
 	await vi.advanceTimersByTimeAsync(20_000);
 	exec.mock.calls[0][0]();
 	expect(await outcome).toBe("success");
@@ -73,7 +88,10 @@ test("an idle resume cannot time out a later browser sign-in", async () => {
 
 test("returning to the browser cancels the resume deadline until the next return", async () => {
 	const pending = auth.login();
-	const outcome = pending.then(() => "success", (error) => error.message);
+	const outcome = pending.then(
+		() => "success",
+		(error) => error.message,
+	);
 	document.dispatchEvent(new Event("resume"));
 	await vi.advanceTimersByTimeAsync(30_000);
 	document.dispatchEvent(new Event("pause"));
@@ -85,7 +103,8 @@ test("returning to the browser cancels the resume deadline until the next return
 
 test("preserves actionable native errors for every waiter and permits a new attempt", async () => {
 	vi.spyOn(console, "error").mockImplementation(() => {});
-	const message = "Too many sign-in attempts. Please wait 2 minutes and try again.";
+	const message =
+		"Too many sign-in attempts. Please wait 2 minutes and try again.";
 	const first = expect(auth.login()).rejects.toThrow(message);
 	const second = expect(auth.login()).rejects.toThrow(message);
 	exec.mock.calls[0][1](message);
@@ -99,7 +118,9 @@ test("preserves actionable native errors for every waiter and permits a new atte
 	document.dispatchEvent(new Event("resume"));
 	await vi.advanceTimersByTimeAsync(60_000);
 	await timedOut;
-	const nextAttempt = expect(auth.login()).rejects.toThrow("Current attempt failed");
+	const nextAttempt = expect(auth.login()).rejects.toThrow(
+		"Current attempt failed",
+	);
 	exec.mock.calls[2][1]("Previous attempt cancelled");
 	await Promise.resolve();
 	exec.mock.calls[3][1]("Current attempt failed");
@@ -118,7 +139,11 @@ test("account settings use the authentication browser and refresh after it close
 	request.mockResolvedValue(new Response("{}", { status: 401 }));
 	const pending = auth.openAccount();
 	const [closed, , service, action, args] = exec.mock.calls[0];
-	expect([service, action, args]).toEqual(["Authenticator", "openAccount", [{ baseUrl: "https://acode.app" }]]);
+	expect([service, action, args]).toEqual([
+		"Authenticator",
+		"openAccount",
+		[{ baseUrl: "https://acode.app" }],
+	]);
 	expect(request).not.toHaveBeenCalled();
 	closed();
 	await expect(pending).resolves.toBeNull();
