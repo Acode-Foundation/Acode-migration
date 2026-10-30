@@ -116,6 +116,8 @@ public class Authenticator extends Service {
             .buildUpon()
             .appendEncodedPath("login")
             .appendQueryParameter("redirect", "app")
+            .appendQueryParameter("src", "android")
+            .appendQueryParameter("androidPackage", host.getContext().getPackageName())
             .appendQueryParameter("authFlow", "app-code")
             .appendQueryParameter("state", state)
             .appendQueryParameter("challenge", challenge)

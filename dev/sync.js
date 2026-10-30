@@ -57,7 +57,7 @@ function patchProjectFile(pkg) {
 function patchDisplayName(pkg) {
 	patchFile(infoPlistFile, (content) =>
 		content.replace(
-			/(<key>CFBundleDisplayName<\/key>\s*\n\s*<string>)[^<]*(<\/string>)/,
+			/(<key>CFBundle(?:Display)?Name<\/key>\s*\n\s*<string>)[^<]*(<\/string>)/g,
 			`$1${pkg.displayName}$2`,
 		),
 	);

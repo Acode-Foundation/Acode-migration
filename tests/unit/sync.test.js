@@ -65,7 +65,7 @@ test("patchProjectFile leaves the project untouched when values already match", 
 test("patchDisplayName syncs the name across native and web files", () => {
 	const files = {
 		"runner/Info.plist":
-			"<key>CFBundleDisplayName</key>\n\t<string>Old</string>",
+			"<key>CFBundleDisplayName</key>\n\t<string>Old</string>\n<key>CFBundleName</key>\n\t<string>runner</string>",
 		"values/strings.xml":
 			'<resources><string name="app_name">Old</string></resources>',
 		"settings.gradle.kts": 'rootProject.name = "Old"',
@@ -84,7 +84,12 @@ test("patchDisplayName syncs the name across native and web files", () => {
 
 	patchDisplayName({ displayName: "Example" });
 
-	expect(writes["runner/Info.plist"]).toContain("<string>Example</string>");
+	expect(writes["runner/Info.plist"]).toContain(
+		"<key>CFBundleDisplayName</key>\n\t<string>Example</string>",
+	);
+	expect(writes["runner/Info.plist"]).toContain(
+		"<key>CFBundleName</key>\n\t<string>Example</string>",
+	);
 	expect(writes["values/strings.xml"]).toContain('name="app_name">Example<');
 	expect(writes["settings.gradle.kts"]).toContain(
 		'rootProject.name = "Example"',
