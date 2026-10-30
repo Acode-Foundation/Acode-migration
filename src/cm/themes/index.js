@@ -1,5 +1,11 @@
+import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { EditorState } from "@codemirror/state";
-import { oneDark } from "@codemirror/theme-one-dark";
+import {
+	oneDark,
+	oneDarkHighlightStyle,
+	oneDarkTheme,
+} from "@codemirror/theme-one-dark";
+import { tags as t } from "@lezer/highlight";
 import aura, { config as auraConfig } from "./aura";
 import ayuDark, { config as ayuDarkConfig } from "./ayuDark";
 import {
@@ -46,6 +52,25 @@ const oneDarkConfig = {
 	operator: "#56b6c2",
 	invalid: "#ff6b6b",
 };
+
+// One Dark with method calls, method definitions and function declaration
+// names in the function colour, matching the other built-in themes.
+const oneDarkExtensions = [
+	oneDarkTheme,
+	syntaxHighlighting(
+		HighlightStyle.define([
+			...oneDarkHighlightStyle.specs,
+			{
+				tag: [
+					t.function(t.propertyName),
+					t.function(t.definition(t.propertyName)),
+					t.function(t.definition(t.variableName)),
+				],
+				color: oneDarkConfig.function,
+			},
+		]),
+	),
+];
 
 const themes = new Map();
 const warnedInvalidThemes = new Set();
@@ -177,7 +202,13 @@ export function removeTheme(id) {
 	themes.delete(String(id).toLowerCase());
 }
 
-addBuiltInTheme("one_dark", "One Dark", true, () => [oneDark], oneDarkConfig);
+addBuiltInTheme(
+	"one_dark",
+	"One Dark",
+	true,
+	() => oneDarkExtensions,
+	oneDarkConfig,
+);
 addBuiltInTheme(
 	auraConfig.name,
 	"Aura",

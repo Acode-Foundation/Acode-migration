@@ -1,12 +1,4 @@
-import type {
-	LSPClient,
-	LSPClientExtension,
-} from "@codemirror/lsp-client";
-import {
-	getAllLspPlugins,
-	getLspPlugin,
-	getLspPluginForFeature,
-} from "./clientLoader";
+import type { LSPClient, LSPClientExtension } from "@codemirror/lsp-client";
 import type { Extension, Range } from "@codemirror/state";
 import { MapMode, StateEffect, StateField } from "@codemirror/state";
 import {
@@ -25,6 +17,7 @@ import type {
 	TextEdit,
 } from "vscode-languageserver-types";
 import {
+	type ColorChipPayload,
 	clamp01,
 	colorChipDecoration,
 	colorChipTheme,
@@ -37,10 +30,14 @@ import {
 	lspColorToCss,
 	lspColorToHex,
 	openColorPicker,
-	type ColorChipPayload,
 } from "../colorChip";
-import type { LSPPluginAPI } from "./types";
+import {
+	getAllLspPlugins,
+	getLspPlugin,
+	getLspPluginForFeature,
+} from "./clientLoader";
 import { safeLspPositionToOffset } from "./positionUtils";
+import type { LSPPluginAPI } from "./types";
 
 export interface DocumentColorsConfig {
 	enabled?: boolean;
@@ -299,8 +296,10 @@ function createPlugin(config: DocumentColorsConfig) {
 					return;
 				}
 
-				const bindings = getAllLspPlugins(this.view, "documentColor") as
-					readonly LSPPluginAPI[];
+				const bindings = getAllLspPlugins(
+					this.view,
+					"documentColor",
+				) as readonly LSPPluginAPI[];
 				const connected = bindings.filter((lsp) => lsp.client.connected);
 				if (!connected.length) {
 					if (this.hasProvider || this.providerKnown) {
@@ -349,11 +348,7 @@ function createPlugin(config: DocumentColorsConfig) {
 						>("textDocument/documentColor", {
 							textDocument: { uri: lsp.uri },
 						});
-						return this.process(
-							lsp,
-							result ?? [],
-							this.view.state.doc.length,
-						);
+						return this.process(lsp, result ?? [], this.view.state.doc.length);
 					}),
 				);
 				if (id !== this.reqId) return;
@@ -443,9 +438,11 @@ async function handleColorPick(
 	view: EditorView,
 	payload: ColorChipPayload,
 ): Promise<void> {
-	const lsp = (payload.lspClient
-		? getLspPlugin(view, payload.lspClient)
-		: getLspPluginForFeature(view, "documentColor")) as LSPPluginAPI | null;
+	const lsp = (
+		payload.lspClient
+			? getLspPlugin(view, payload.lspClient)
+			: getLspPluginForFeature(view, "documentColor")
+	) as LSPPluginAPI | null;
 	if (!lsp?.client.connected) return;
 
 	const doc = view.state.doc;
@@ -459,9 +456,11 @@ async function handleColorPick(
 	const picked = await openColorPicker(seed);
 	if (!picked) return;
 
-	const lsp2 = (payload.lspClient
-		? getLspPlugin(view, payload.lspClient)
-		: getLspPluginForFeature(view, "documentColor")) as LSPPluginAPI | null;
+	const lsp2 = (
+		payload.lspClient
+			? getLspPlugin(view, payload.lspClient)
+			: getLspPluginForFeature(view, "documentColor")
+	) as LSPPluginAPI | null;
 	if (!lsp2?.client.connected) return;
 
 	const live = findLiveColor(view, payload, currentText);

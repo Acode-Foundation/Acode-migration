@@ -30,6 +30,7 @@ vi.mock("utils/helpers", () => ({
 			new Promise((resolve, reject) => fn(...args, resolve, reject)),
 	},
 }));
+
 import selectAppIcon from "lib/appIconSelection";
 
 function harness() {
@@ -77,7 +78,10 @@ beforeEach(() => {
 });
 
 describe("icon selection", () => {
-	it.each([false, true])("uses the iOS flow with Pro access %s", async (hasPro) => {
+	it.each([
+		false,
+		true,
+	])("uses the iOS flow with Pro access %s", async (hasPro) => {
 		mocks.platform.isIOS = true;
 		mocks.config.HAS_PRO = hasPro;
 		await harness().select("pixel_party");

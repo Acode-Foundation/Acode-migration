@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import iap from "native/iap";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 const exec = vi.fn();
 

@@ -19,8 +19,14 @@ describe("plugin context native bridge", () => {
 		const pluginContext = await import("lib/pluginContext");
 
 		await expect(pluginContext.connect()).resolves.toBe(true);
-		expect(Object.getOwnPropertyDescriptor(Bridge, "exec").writable).toBe(false);
-		expect(Object.getOwnPropertyDescriptor(Bridge, "exec").configurable).toBe(false);
-		await expect(pluginContext.default("example.plugin", "{}")).resolves.toBeTruthy();
+		expect(Object.getOwnPropertyDescriptor(Bridge, "exec").writable).toBe(
+			false,
+		);
+		expect(Object.getOwnPropertyDescriptor(Bridge, "exec").configurable).toBe(
+			false,
+		);
+		await expect(
+			pluginContext.default("example.plugin", "{}"),
+		).resolves.toBeTruthy();
 	});
 });

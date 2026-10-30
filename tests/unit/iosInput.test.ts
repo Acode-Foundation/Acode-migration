@@ -9,7 +9,8 @@ afterEach(() => {
 });
 
 test("disables suggestions without changing input types, autofill or selection, then restores field defaults", () => {
-	document.body.innerHTML = '<input type="email" autocomplete="email" autocorrect="on"><textarea spellcheck="false">code</textarea><div contenteditable="true" autocorrect="off">editor</div>';
+	document.body.innerHTML =
+		'<input type="email" autocomplete="email" autocorrect="on"><textarea spellcheck="false">code</textarea><div contenteditable="true" autocorrect="off">editor</div>';
 	const input = document.querySelector("input")!;
 	const area = document.querySelector("textarea")!;
 	area.focus();
@@ -20,13 +21,19 @@ test("disables suggestions without changing input types, autofill or selection, 
 	expect(input.type).toBe("email");
 	expect(input.autocomplete).toBe("email");
 	expect(document.activeElement).toBe(area);
-	expect([area.selectionStart, area.selectionEnd, area.value]).toEqual([1, 3, "code"]);
+	expect([area.selectionStart, area.selectionEnd, area.value]).toEqual([
+		1,
+		3,
+		"code",
+	]);
 	setInputType("NO_SUGGESTIONS");
 	setInputType("NORMAL");
 	expect(input.getAttribute("autocorrect")).toBe("on");
 	expect(input.hasAttribute("writingsuggestions")).toBe(false);
 	expect(area.getAttribute("spellcheck")).toBe("false");
-	expect(document.querySelector("div")!.getAttribute("autocorrect")).toBe("off");
+	expect(document.querySelector("div")!.getAttribute("autocorrect")).toBe(
+		"off",
+	);
 });
 
 test("handles dynamic plugin fields, author attribute updates, removal and repeated mode changes", async () => {
@@ -44,7 +51,7 @@ test("handles dynamic plugin fields, author attribute updates, removal and repea
 	expect(field.getAttribute("autocorrect")).toBe("off");
 	setInputType("NORMAL");
 	expect(field.getAttribute("autocorrect")).toBe("on");
-	await new Promise(resolve => setTimeout(resolve, 10));
+	await new Promise((resolve) => setTimeout(resolve, 10));
 	expect(field.getAttribute("autocorrect")).toBe("on");
 });
 

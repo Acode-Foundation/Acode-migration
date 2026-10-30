@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
 const mocks = vi.hoisted(() => ({
 	config: { HAS_PRO: false, BASE_URL: "https://acode.app" },
 	alert: vi.fn(),
@@ -25,7 +26,9 @@ vi.mock("lib/startAd", () => ({
 	BANNER_SUPPRESSION_REASON: { PRO: "pro" },
 	setBannerSuppressed: mocks.suppress,
 }));
+
 import removeAds, { requestProPurchase, restorePurchases } from "lib/removeAds";
+
 let purchaseUpdated;
 let purchaseError;
 beforeEach(() => {

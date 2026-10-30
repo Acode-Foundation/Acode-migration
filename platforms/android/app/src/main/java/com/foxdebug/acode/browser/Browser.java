@@ -219,6 +219,7 @@ public class Browser extends LinearLayout {
     createMenu();
     addView(titleLayout);
     addView(webViewContainer);
+    restoreEmulator();
   }
 
   private void createMenu() {
@@ -228,6 +229,10 @@ public class Browser extends LinearLayout {
     menu.addItem(Ui.Icons.DEVICES, "Devices", false);
     menu.addItem(Ui.Icons.NO_CACHE, "Disable Cache", false);
     menu.addItem(Ui.Icons.TERMINAL, "Console", false);
+    menu.addItem(Ui.Icons.TUNE, "Set as Default");
+    menu.addItem(Ui.Icons.REFRESH, "Clear Default");
+    menu.setVisible("Set as Default", false);
+    menu.setVisible("Clear Default", false);
     menu.addItem(Ui.Icons.OPEN_IN_BROWSER, "Open in Browser");
     menu.addItem(Ui.Icons.EXIT, "Exit");
 
@@ -242,6 +247,7 @@ public class Browser extends LinearLayout {
               }
 
               emulator = checked;
+              updateDefaultItems(checked);
               if (checked) {
                 setDesktopMode(true);
                 setConsoleVisible(false);
@@ -276,6 +282,26 @@ public class Browser extends LinearLayout {
             case "Console":
               setConsoleVisible(checked);
               break;
+            case "Set as Default":
+              if (deviceEmulator != null) {
+                deviceEmulator.saveAsDefault();
+                updateDefaultItems(emulator);
+                Toast
+                  .makeText(
+                    context,
+                    "Saved as default preview",
+                    Toast.LENGTH_SHORT
+                  )
+                  .show();
+              }
+              break;
+            case "Clear Default":
+              Emulator.clearDefault(context);
+              updateDefaultItems(emulator);
+              Toast
+                .makeText(context, "Default cleared", Toast.LENGTH_SHORT)
+                .show();
+              break;
             case "Disable Cache":
               webView
                 .getSettings()
@@ -298,6 +324,75 @@ public class Browser extends LinearLayout {
         }
       }
     );
+  }
+
+  private void updateDefaultItems(boolean emulatorOn) {
+    menu.setVisible("Set as Default", emulatorOn);
+    menu.setVisible(
+      "Clear Default",
+      emulatorOn && Emulator.hasDefault(context)
+    );
+  }
+
+  private void reloadAfterLayout() {
+    // If no page was requested yet, the first load will already happen at
+    // the saved size, so there is nothing to reload.
+    if (url.isEmpty()) return;
+
+    webView
+      .getViewTreeObserver()
+      .addOnGlobalLayoutListener(
+        new ViewTreeObserver.OnGlobalLayoutListener() {
+          @Override
+          public void onGlobalLayout() {
+            webView.getViewTreeObserver().removeOnGlobalLayoutListener(this);
+            webView.reload();
+          }
+        }
+      );
+  }
+
+  private void restoreEmulator() {
+    if (onlyConsole) return;
+    if (!Emulator.hasDefault(context)) return;
+
+    // Apply the saved mode before the first navigation so the page is not
+    // loaded with the wrong user agent and then reloaded.
+    setDesktopMode(true, false);
+
+    webView
+      .getViewTreeObserver()
+      .addOnGlobalLayoutListener(
+        new ViewTreeObserver.OnGlobalLayoutListener() {
+          @Override
+          public void onGlobalLayout() {
+            if (webView.getMeasuredWidth() == 0) return;
+            webView.getViewTreeObserver().removeOnGlobalLayoutListener(this);
+
+            if (deviceEmulator == null) {
+              createDeviceEmulatorLayout();
+              deviceEmulator.setRestoredListener(
+                new Runnable() {
+                  @Override
+                  public void run() {
+                    reloadAfterLayout();
+                  }
+                }
+              );
+            }
+
+            emulator = true;
+            menu.setChecked("Devices", true);
+            updateDefaultItems(true);
+            setConsoleVisible(false);
+            menu.setChecked("Console", false);
+            menu.setVisible("Console", false);
+            addView(deviceEmulator);
+            // The emulator sets up its sliders on a later layout pass and then
+            // applies the saved size itself, so the webview is not resized here.
+          }
+        }
+      );
   }
 
   private void createDeviceEmulatorLayout() {
@@ -331,6 +426,10 @@ public class Browser extends LinearLayout {
   }
 
   private void setDesktopMode(boolean enabled) {
+    setDesktopMode(enabled, true);
+  }
+
+  private void setDesktopMode(boolean enabled, boolean reload) {
     int width = 0;
     int height = 0;
     WebSettings webSettings = webView.getSettings();
@@ -352,7 +451,9 @@ public class Browser extends LinearLayout {
     webSettings.setLoadWithOverviewMode(enabled);
     webSettings.setSupportZoom(enabled);
     webSettings.setBuiltInZoomControls(enabled);
-    webView.reload();
+    if (reload) {
+      webView.reload();
+    }
   }
 
   public void setDesktopMode() {
