@@ -5,30 +5,42 @@ import UIKit
 /// passes through emulated sockets. Guest shells are the only emulated part.
 final class TerminalServer {
     static let shared = TerminalServer()
-    private static let port = 8767
+    static let defaultPort = 8767
     private static let origins: Set = ["https://localhost", "acode://localhost"]
     private static let captureLimit = 16 * 1024 * 1024
     private let queue = DispatchQueue(label: "app.acode.terminal", qos: .userInitiated)
-    private let runtime = AlpineRuntime.shared
+    private let runtime = UbuntuRuntime.shared
     private var server: LocalHTTPServer?
     private var listening = false
+    private var binding: [(Error?) -> Void]?
+    private var generation = 0
+    private var port = TerminalServer.defaultPort
     private var shell = ""
     private var sessions: [Int32: TerminalSession] = [:]
 
     private init() {
         // iOS reclaims listening sockets of suspended apps; sessions outlive the listener.
         NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: nil) { [weak self] _ in
-            self?.queue.async { self?.relisten() }
+            self?.queue.async { if self?.server != nil { self?.relisten() } }
         }
     }
 
     var isRunning: Bool { queue.sync { listening } }
 
-    func start(shell: String, completion: @escaping (Error?) -> Void) {
+    /// Port the listener is bound to, or the port it will bind next.
+    var currentPort: Int { queue.sync { port } }
+
+    func start(shell: String, port requestedPort: Int? = nil, completion: @escaping (Error?) -> Void) {
         queue.async { [self] in
-            guard server == nil else { completion(nil); return }
             self.shell = shell
-            listen(completion)
+            if let requestedPort, requestedPort > 0, requestedPort <= Int(UInt16.max), requestedPort != port, binding == nil {
+                port = requestedPort
+                // Sessions belong to this object, not the socket, so they survive the move.
+                if server != nil { relisten(completion); return }
+            }
+            // A live server object is not proof the port is bound: iOS reclaims
+            // the socket while suspended. Re-listen in that case.
+            if listening { completion(nil) } else if server != nil { relisten(completion) } else { listen(completion) }
         }
     }
 
@@ -39,12 +51,34 @@ final class TerminalServer {
             server?.stop()
             server = nil
             listening = false
+            generation += 1
+            finishBinding(terminalError("Terminal server stopped"))
         }
     }
 
+    /// Joins the bind in flight, if any: a second listener on the same port
+    /// fails with EADDRINUSE and would orphan the first one.
     private func listen(_ completion: @escaping (Error?) -> Void = { _ in }) {
+        if binding != nil { binding?.append(completion); return }
+        binding = [completion]
+        bind()
+    }
+
+    private func relisten(_ completion: @escaping (Error?) -> Void = { _ in }) {
+        guard let server, binding == nil else { listen(completion); return }
+        binding = [completion]
+        self.server = nil
+        listening = false
+        // stop() may have cancelled this rebind while the old socket closed.
+        let current = generation
+        server.stop { [weak self] in
+            self?.queue.async { if let self, self.generation == current { self.bind() } }
+        }
+    }
+
+    private func bind() {
         do {
-            let server = try LocalHTTPServer(port: Self.port, loopback: true, queue: queue)
+            let server = try LocalHTTPServer(port: port, loopback: true, queue: queue)
             self.server = server
             server.onRequest = { [weak self] request, client in self?.route(request, client) }
             server.start { [weak self, weak server] result in
@@ -52,20 +86,20 @@ final class TerminalServer {
                 switch result {
                 case .success:
                     listening = true
-                    completion(nil)
+                    finishBinding(nil)
                 case .failure(let error):
                     self.server = nil
                     listening = false
-                    completion(error)
+                    finishBinding(error)
                 }
             }
-        } catch { completion(error) }
+        } catch { finishBinding(error) }
     }
 
-    private func relisten() {
-        guard let server else { return }
-        listening = false
-        server.stop { [weak self] in self?.queue.async { self?.listen() } }
+    private func finishBinding(_ error: Error?) {
+        let waiting = binding ?? []
+        binding = nil
+        for completion in waiting { completion(error) }
     }
 
     private func route(_ request: LocalHTTPRequest, _ client: LocalHTTPConnection) {
