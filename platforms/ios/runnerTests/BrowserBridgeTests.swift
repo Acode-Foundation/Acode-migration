@@ -5,6 +5,34 @@ import XCTest
 
 @MainActor
 final class BrowserBridgeTests: BridgeTestCase {
+    func testAcodeWebsiteLinksCarryIOSSourceWithoutLosingTheirDestination() throws {
+        for host in ["acode.app", "dev.acode.app"] {
+            for path in ["/", "/faqs", "/profile/edit"] {
+                let original = try XCTUnwrap(URL(string: "https://\(host)\(path)?state=a%26b&src=android&src=ios#details"))
+                let rewritten = SafariService.websiteURL(original)
+                let components = try XCTUnwrap(URLComponents(url: rewritten, resolvingAgainstBaseURL: false))
+                XCTAssertEqual(components.host, host)
+                XCTAssertEqual(components.path, path)
+                XCTAssertEqual(components.fragment, "details")
+                XCTAssertEqual(components.queryItems?.filter { $0.name == "src" }, [URLQueryItem(name: "src", value: "ios")])
+                XCTAssertEqual(components.queryItems?.first { $0.name == "state" }?.value, "a&b")
+                XCTAssertEqual(SafariService.websiteURL(rewritten), rewritten)
+            }
+        }
+        XCTAssertEqual(SafariService.websiteURL(URL(string: "https://acode.app")!).query, "src=ios")
+        let encoded = "https://acode.app/login?code=a%2Bb&redirect=https%3A%2F%2Facode.app%2Fx%3Fkey%3Da%2Bb&flag&src=android#done"
+        XCTAssertEqual(SafariService.websiteURL(URL(string: encoded)!).absoluteString,
+                       encoded.replacingOccurrences(of: "src=android", with: "src=ios"))
+    }
+
+    func testOtherBrowserDestinationsRemainUnchanged() throws {
+        for value in ["https://example.com/?src=android", "https://acode.app.example.com/", "https://docs.acode.app/",
+                      "https://acode.app:8443/", "https://user@acode.app/", "http://acode.app/", "mailto:acode@foxdebug.com"] {
+            let url = try XCTUnwrap(URL(string: value))
+            XCTAssertEqual(SafariService.websiteURL(url), url)
+        }
+    }
+
     func testResetSettlesOpenCallbacksDuringPresentation() async throws {
         let webView = try await appWebView()
         var responder: UIResponder? = webView
