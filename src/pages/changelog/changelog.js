@@ -6,6 +6,7 @@ import toast from "components/toast";
 import DOMPurify from "dompurify";
 import Ref from "html-tag-js/ref";
 import actionStack from "lib/actionStack";
+import platform from "lib/platform";
 import markdownIt from "markdown-it";
 import markdownItFootnote from "markdown-it-footnote";
 import markdownItTaskLists from "markdown-it-task-lists";
@@ -52,9 +53,7 @@ export default async function Changelog() {
         <li action="latest">
           <span class="text">Latest Release</span>
         </li>
-        <li action="beta">
-          <span class="text">Beta Version</span>
-        </li>
+        ${platform.isIOS ? "" : `<li action="beta"><span class="text">Beta Version</span></li>`}
         <li action="full">
           <span class="text">Full Changelog</span>
         </li>
@@ -186,6 +185,7 @@ export default async function Changelog() {
 				await loadLatestRelease();
 				break;
 			case "beta":
+				if (platform.isIOS) return;
 				await loadBetaRelease();
 				break;
 			case "full":

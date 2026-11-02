@@ -128,6 +128,7 @@ final class HTTPFixture: @unchecked Sendable {
         case "/empty": status = "204 No Content"; data = Data()
         case "/error": status = "422 Unprocessable Entity"; data = Data("invalid request".utf8)
         case "/cookie": headers += "Set-Cookie: session=fixture; Path=/\r\n"; data = Data("cookie".utf8)
+        case "/cookie-redirect": status = "302 Found"; headers += "Location: /cookie-check\r\nSet-Cookie: session=redirect-fixture; Path=/\r\n"; data = Data()
         case "/cookie-check": data = Data(head.utf8)
         case "/stream": data = Data((0..<524288).map { UInt8($0 % 256) })
         default: break

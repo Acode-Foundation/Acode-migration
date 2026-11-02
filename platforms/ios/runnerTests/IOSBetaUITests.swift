@@ -4,17 +4,17 @@ import WebKit
 
 @MainActor
 final class IOSBetaUITests: BridgeTestCase {
-    func testHomeBadgeAndTerminalInfoFollowActiveTab() async throws {
+    func testHomeAndTerminalInfoFollowActiveTab() async throws {
         let webView = try await editorWebView()
         let home = try await webView.callAsyncJavaScript("""
             await acode.exec('welcome');
             editorManager.getFile('welcome-tab').makeActive();
             const badge=editorManager.getFile('welcome-tab').content.shadowRoot.querySelector('.beta-badge');
-            return badge?.textContent === 'Beta' && getComputedStyle(badge).display !== 'none'
+            return !badge
                 && !editorManager.header.querySelector('[data-action="terminal-info"]');
             """, arguments: [:], in: nil, contentWorld: .page) as? Bool
         XCTAssertEqual(home, true)
-        await capture(webView, name: "iOS home Beta badge")
+        await capture(webView, name: "iOS home")
 
         defer {
             webView.evaluateJavaScript("document.querySelector('.prompt.alert button')?.click();editorManager.getFile('ios-beta-terminal')?.remove(true);editorManager.getFile('ios-beta-editor')?.remove(true);editorManager.getFile('welcome-tab')?.makeActive();")

@@ -13,6 +13,7 @@ export default function installAPITransport() {
 		if (request.mode === "same-origin")
 			throw new TypeError("Cross-origin request is not allowed");
 		const headers = new Headers(request.headers);
+		headers.set("X-Acode-API-Origin", new URL(request.url).origin);
 		headers.set("X-Acode-Credentials", request.credentials);
 		headers.set("X-Acode-Redirect", request.redirect);
 		const response = await fetch.call(window, target, {
@@ -52,7 +53,7 @@ function localURL(value: string) {
 	try {
 		const url = new URL(value, location.href);
 		if (
-			url.origin !== "https://acode.app" ||
+			!["https://acode.app", "https://dev.acode.app"].includes(url.origin) ||
 			url.username ||
 			url.password ||
 			!(url.pathname === "/api" || url.pathname.startsWith("/api/"))
