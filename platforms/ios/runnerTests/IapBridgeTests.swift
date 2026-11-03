@@ -8,12 +8,15 @@ import WebKit
 final class IapBridgeTests: BridgeTestCase {
     private var session: SKTestSession!
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
         let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "Iap", withExtension: "storekit"))
         session = try SKTestSession(contentsOf: url)
         session.resetToDefaultState()
         session.clearTransactions()
         session.disableDialogs = true
+        try await super.setUp()
+        try await reloadWebView(try await appWebView())
+        _ = try await editorWebView()
     }
 
     override func tearDownWithError() throws {
@@ -77,8 +80,7 @@ final class IapBridgeTests: BridgeTestCase {
     func testUnfinishedPurchasesSurviveReloadAndConsumablesCanBeBoughtAgain() async throws {
         let webView = try await prepare()
         let first = try await buy(webView, product: "ios_test_tip")
-        webView.reload()
-        try await Task.sleep(for: .milliseconds(300))
+        try await reloadWebView(webView)
         _ = try await prepare()
         let purchases = try await call(webView, action: "getPurchases") as? [[String: Any]]
         XCTAssertEqual(purchases?.count, 1)

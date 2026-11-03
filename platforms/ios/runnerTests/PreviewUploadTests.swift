@@ -24,6 +24,8 @@ final class PreviewUploadTests: BridgeTestCase {
         let host = try XCTUnwrap(responder as? WebViewController)
         let browser = PreviewViewController(url: URL(string: server.origin + "/preview-transfers")!, theme: [:], console: false)
         browser.consoleEnabled = false
+        let loaded = expectation(description: "Upload fixture navigation finished")
+        browser.onPageFinished = { loaded.fulfill() }
         await withCheckedContinuation { continuation in host.present(browser, animated: false) { continuation.resume() } }
         addTeardownBlock { @MainActor in
             await withCheckedContinuation { continuation in
@@ -31,10 +33,8 @@ final class PreviewUploadTests: BridgeTestCase {
                 browser.close()
             }
         }
-        for _ in 0..<100 {
-            if (try? await browser.webView.evaluateJavaScript("document.title==='Preview transfers'")) as? Bool == true { break }
-            try await Task.sleep(for: .milliseconds(50))
-        }
+        await fulfillment(of: [loaded], timeout: 5)
+        browser.onPageFinished = nil
         _ = try await browser.webView.evaluateJavaScript("""
             upload.addEventListener('change',async()=>{
                 try {

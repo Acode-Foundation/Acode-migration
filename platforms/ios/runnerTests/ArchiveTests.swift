@@ -127,6 +127,8 @@ final class ArchiveTests: BridgeTestCase {
             try await Task.sleep(for: .milliseconds(50))
         }
         let selected = try XCTUnwrap(picker)
+        // Simulated selection can finish before the remote document service disconnects.
+        addTeardownBlock { @MainActor in withExtendedLifetime(selected) {} }
         selected.delegate?.documentPicker?(selected, didPickDocumentsAt: [archive])
         await withCheckedContinuation { continuation in selected.dismiss(animated: false) { continuation.resume() } }
     }

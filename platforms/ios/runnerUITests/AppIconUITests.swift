@@ -17,7 +17,7 @@ final class AppIconUITests: XCTestCase {
         defer { device.orientation = originalOrientation }
         device.orientation = .portrait
         let app = XCUIApplication()
-        app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US", "-acode-ui-testing"]
         app.launch()
         dismissIconNotice(app)
         let entry = app.webViews.staticTexts["App icon"].firstMatch

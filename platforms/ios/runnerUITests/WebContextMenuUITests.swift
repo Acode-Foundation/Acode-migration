@@ -1,20 +1,11 @@
 import XCTest
-import StoreKitTest
 
 @MainActor
 final class WebContextMenuUITests: XCTestCase {
     func testHoldingAFileTabOpensItsExistingMenuOnRelease() async throws {
         continueAfterFailure = false
-        // Keep this gesture test independent of network consent forms and ads.
-        let configuration = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "Iap", withExtension: "storekit"))
-        let purchases = try SKTestSession(contentsOf: configuration)
-        purchases.resetToDefaultState()
-        purchases.clearTransactions()
-        purchases.disableDialogs = true
-        defer { purchases.clearTransactions(); purchases.resetToDefaultState() }
-        _ = try await purchases.buyProduct(identifier: "acode_pro_new")
         let app = XCUIApplication()
-        app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US", "-acode-ui-testing"]
         app.launch()
         let header = app.webViews.otherElements["banner"].firstMatch
         XCTAssertTrue(header.waitForExistence(timeout: 20), app.debugDescription)
