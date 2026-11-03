@@ -35,10 +35,12 @@ final class ArchiveTests: BridgeTestCase {
                 browser.querySelector('li[data-name="'+name+'"]').click();
                 stage='select entries';
                 await wait(()=>browser.querySelector('li[data-name="notes.txt"]'));
-                page.querySelector('[data-action="toggle-selection-mode"]').click();
+                page.querySelector('[data-action="toggle-menu"]').click();
+                document.querySelector('.context-menu [action="select-items"]').click();
+                await wait(()=>!document.querySelector('.context-menu'));
                 browser.querySelector('li[data-name="日本語 # sample"]').click();
                 browser.querySelector('li[data-name="notes.txt"]').click();
-                page.querySelector('[data-action="toggle-selection-menu"]').click();
+                page.querySelector('[data-action="toggle-menu"]').click();
                 document.querySelector('.context-menu [action="compress"]').click();
                 stage='read generated archive';
                 let archive;
@@ -143,19 +145,23 @@ final class ArchiveTests: BridgeTestCase {
     }
 
     private func cleanup(_ app: WKWebView) async throws {
-        _ = try await app.evaluateJavaScript("""
+        _ = try await app.callAsyncJavaScript("""
             const cancellation=window.archiveCancellation;
             if(cancellation){
                 document.querySelector('#__loader button')?.click();
                 Bridge.exec=cancellation.exec;cancellation.release?.();delete window.archiveCancellation;
             }
-            document.getElementById('file-browser')?.closest('wc-page')?.querySelector('[data-action="close"]')?.click();
+            const page=document.getElementById('file-browser')?.closest('wc-page');
+            if(page?.querySelector('.selection-mode'))page.querySelector('[data-action="close"]').click();
+            page?.querySelector('[data-action="close"]')?.click();
+            for(let n=0;page?.isConnected&&n<100;n++)await new Promise(resolve=>setTimeout(resolve,20));
+            if(page?.isConnected)throw Error('Archive browser did not close');
             const saved=window.archiveFixture;
             if(saved){
                 if(saved.storage===undefined)delete localStorage.storageList;else localStorage.storageList=saved.storage;
                 if(saved.state===undefined)delete localStorage.fileBrowserState;else localStorage.fileBrowserState=saved.state;
             }
             delete window.archiveFixture;
-            """)
+            """, arguments: [:], in: nil, contentWorld: .page)
     }
 }

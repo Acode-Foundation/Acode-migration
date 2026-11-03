@@ -16,6 +16,7 @@ final class PreviewBrowserTests: BridgeTestCase {
             XCTAssertEqual(browser.address.text, "Console")
             XCTAssertNil(browser.menuButton.superview)
             assertCompactHeader(browser, screenshot: "console")
+            await waitForKeyboardToHide(browser)
             let initialHeight = browser.content.bounds.height
             let result = try await browser.webView.callAsyncJavaScript("""
                 const input=document.querySelector('#__c-input');
@@ -31,7 +32,7 @@ final class PreviewBrowserTests: BridgeTestCase {
             XCTAssertLessThan(browser.content.bounds.height, initialHeight, "The software keyboard must actually appear")
             attachScreenshot(browser, name: "console-keyboard")
             _ = try await browser.webView.evaluateJavaScript("document.querySelector('#__c-input').blur()")
-            try await Task.sleep(for: .milliseconds(500))
+            await waitForKeyboardToHide(browser)
             XCTAssertEqual(browser.content.bounds.height, initialHeight, accuracy: 1)
             await withCheckedContinuation { continuation in browser.dismiss(animated: false) { continuation.resume() } }
         } catch {
@@ -146,6 +147,15 @@ final class PreviewBrowserTests: BridgeTestCase {
         }
         let contents = try? await webView.evaluateJavaScript("document.body.innerText")
         throw NSError(domain: "AcodeTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Preview failed: \(expression); \(String(describing: contents))"])
+    }
+
+    private func waitForKeyboardToHide(_ browser: PreviewViewController) async {
+        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            browser.view.layoutIfNeeded()
+            return browser.content.bounds.height > 0 &&
+                abs(browser.content.frame.maxY - browser.view.safeAreaLayoutGuide.layoutFrame.maxY) < 1
+        }, object: nil)
+        await fulfillment(of: [hidden], timeout: 5)
     }
 
     private func cleanup(_ app: WKWebView, port: Int) async throws {

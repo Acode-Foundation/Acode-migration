@@ -19,7 +19,7 @@ final class AppIconUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
-        dismissIconNotice(app, required: false)
+        dismissIconNotice(app)
         let entry = app.webViews.staticTexts["App icon"].firstMatch
         if !entry.waitForExistence(timeout: 2) {
             let settings = app.webViews.staticTexts["Settings"].firstMatch
@@ -49,8 +49,13 @@ final class AppIconUITests: XCTestCase {
                 continue
             }
             tapWhenReady(button)
-            dismissIconNotice(app, required: true)
+            dismissIconNotice(app)
             XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5))
+            tapWhenReady(entry)
+            let selected = app.webViews.switches[icon].firstMatch
+            let saved = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "1"), object: selected)
+            await fulfillment(of: [saved], timeout: 5)
+            tapWhenReady(app.webViews.buttons.matching(NSPredicate(format: "label ==[c] %@", "close")).firstMatch)
         }
         XCTAssertTrue(app.webViews.staticTexts["App icon"].firstMatch.exists)
     }
@@ -72,11 +77,10 @@ final class AppIconUITests: XCTestCase {
         }
     }
 
-    private func dismissIconNotice(_ app: XCUIApplication, required: Bool) {
+    private func dismissIconNotice(_ app: XCUIApplication) {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        let alert = app.alerts.firstMatch.waitForExistence(timeout: required ? 5 : 1)
+        let alert = app.alerts.firstMatch.waitForExistence(timeout: 2)
             ? app.alerts.firstMatch : springboard.alerts.firstMatch
-        if required { XCTAssertTrue(alert.waitForExistence(timeout: 5), app.debugDescription) }
         if alert.exists {
             XCTAssertTrue(alert.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "changed the icon")).firstMatch.exists)
             alert.buttons["OK"].tap()

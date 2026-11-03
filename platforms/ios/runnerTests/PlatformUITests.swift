@@ -20,9 +20,8 @@ final class PlatformUITests: BridgeTestCase {
                 await wait('initial scroll',()=>scroller.scrollTop>0);
                 const scrollTop=scroller.scrollTop;
                 document.body.append(page);
-                await wait('root detached',()=>!root.isConnected);
-                if(document.querySelectorAll('wc-page').length!==1)throw Error('Covered editor remains mounted');
-                if(!root.handler.$replacement.isConnected)throw Error('Editor lost its placeholder');
+                await wait('cover shown',()=>page.isConnected&&getComputedStyle(page).opacity==='1');
+                if(!root.isConnected||root.handler.$replacement.isConnected)throw Error('Primary editor was detached');
                 page.hide();
                 await wait('root restored',()=>root.isConnected&&!page.isConnected);
                 await wait('scroll position restored',()=>scroller.scrollTop===scrollTop);
@@ -90,7 +89,7 @@ final class PlatformUITests: BridgeTestCase {
             system.openInBrowser=(...args)=>opened.push(args);
             Bridge.clipboard.copy=value=>{copied=value;};
             const stack=acode.require('actionStack');
-            let settingsPage;
+            let settingsPage,cover;
             try {
                 await acode.exec('open','settings');
                 await wait(()=>document.querySelector('.main-settings-page [data-key="about"]'));
@@ -108,8 +107,13 @@ final class PlatformUITests: BridgeTestCase {
                 const scrollTop=body.scrollTop;
                 document.querySelector('.main-settings-page [data-key="about"]').click();
                 await wait(()=>document.querySelector('#about-page')?.textContent.includes('com.apple.WebKit'));
+                if(!settingsElement.isConnected)throw Error('Previous page was detached too early');
+                cover=acode.require('page')('Nested navigation fixture');
+                document.body.append(cover);
                 await wait(()=>!settingsElement.isConnected);
-                if(!settingsElement.handler.$replacement.isConnected)throw Error('Covered settings page lost its placeholder');
+                if(!settingsElement.handler.$replacement.isConnected)throw Error('Deeply covered settings page lost its placeholder');
+                cover.hide();
+                await wait(()=>settingsElement.isConnected&&!cover.isConnected);
                 const info=document.querySelector('#about-page .info-item');
                 if(info.hasAttribute('href')||!info.textContent.includes('WebKit'))throw Error('WebKit information offers an Android update link');
                 info.click();
@@ -125,6 +129,7 @@ final class PlatformUITests: BridgeTestCase {
                 return true;
             } finally {
                 system.openInBrowser=openBrowser;Bridge.clipboard.copy=copy;
+                if(cover?.isConnected){cover.hide();await wait(()=>!cover.isConnected);}
                 if(document.getElementById('about-page'))stack.pop();
                 settingsPage?.hide();
             }
