@@ -33,6 +33,7 @@ final class PreviewViewController: UIViewController {
     private var observations: [NSKeyValueObservation] = []
     private var contextMenu: WebContextMenu?
     private var contentBottom: NSLayoutConstraint?
+    private var contentFollowsKeyboard = true
 
     init(url: URL, theme: [String: Any], console: Bool) {
         initialURL = url
@@ -125,10 +126,12 @@ final class PreviewViewController: UIViewController {
     var dialogPresenter: UIViewController? { isClosed ? nil : (isViewLoaded && view.window != nil ? self : auxiliaryPresenter) }
 
     @objc private func keyboardFrameChanged(_ notification: Notification) {
-        guard let window = viewIfLoaded?.window,
+        guard !isClosed, let window = viewIfLoaded?.window,
               let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
         // iOS 26 can leave the keyboard guide above the safe area after dismissal.
         let visible = view.bounds.intersection(view.convert(frame, from: window.screen.coordinateSpace)).height > 0
+        guard visible != contentFollowsKeyboard else { return }
+        contentFollowsKeyboard = visible
         let anchor = visible ? view.keyboardLayoutGuide.topAnchor : view.safeAreaLayoutGuide.bottomAnchor
         contentBottom?.isActive = false
         contentBottom = content.bottomAnchor.constraint(equalTo: anchor)

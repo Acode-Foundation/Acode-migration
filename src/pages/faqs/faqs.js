@@ -5,10 +5,12 @@ import DOMPurify from "dompurify";
 import defaultStrings from "lang/en-us.json";
 import actionStack from "lib/actionStack";
 import config from "lib/config";
+import platform from "lib/platform";
 import markdownIt from "markdown-it";
 
 export default function FAQs() {
-	const cacheKey = `faqs:${config.API_BASE}`;
+	const faqPlatform = platform.isIOS ? "ios" : "android";
+	const cacheKey = `faqs:${config.API_BASE}:${faqPlatform}`;
 	const markdown = markdownIt({ linkify: true });
 	const search = (
 		<button
@@ -47,30 +49,36 @@ export default function FAQs() {
 			{list}
 		</main>
 	);
-	page.onhide = () => {
-		closed = true;
-		hideSearchBar?.();
-		controller?.abort();
-		actionStack.remove("faqs");
-	};
+	page.onhide = cleanup;
 	page.ondisconnect = () => hideSearchBar?.();
 	actionStack.push({ id: "faqs", action: page.hide });
 	app.append(page);
 	void load();
 	return page;
 
+	function cleanup() {
+		if (closed) return;
+		closed = true;
+		hideSearchBar?.();
+		controller?.abort();
+		actionStack.remove("faqs");
+	}
+
 	async function load() {
-		const cached = readCache();
+		if (closed) return;
 		const request = new AbortController();
 		controller = request;
 		const timeout = setTimeout(() => request.abort(), 15000);
 		retry.hidden = true;
-		if (cached) render(cached);
-		else status.textContent = strings["loading..."];
+		status.textContent = strings["loading..."];
 		try {
-			const response = await fetch(`${config.API_BASE}/faqs`, {
-				signal: request.signal,
-			});
+			const response = await fetch(
+				`${config.API_BASE}/faqs?platform=${faqPlatform}`,
+				{
+					signal: request.signal,
+					cache: "no-store",
+				},
+			);
 			if (!response.ok)
 				throw new Error(`FAQ request failed: ${response.status}`);
 			const data = await response.json();
@@ -81,9 +89,14 @@ export default function FAQs() {
 			} catch (error) {
 				console.warn("Unable to cache FAQs", error);
 			}
-			if (!cached?.length) render(data);
+			render(data);
 		} catch (error) {
-			if (closed || cached?.length) return;
+			if (closed) return;
+			const cached = readCache();
+			if (cached?.length) {
+				render(cached);
+				return;
+			}
 			console.error("Unable to load FAQs", error);
 			status.textContent =
 				strings["faqs load failed"] || defaultStrings["faqs load failed"];
@@ -138,14 +151,13 @@ export default function FAQs() {
 					faqs.filter((faq) =>
 						`${faq.q}\n${faq.a}`.toLowerCase().includes(query),
 					),
-					true,
 				);
 			},
 			false,
 		);
 	}
 
-	function results(matches, searching = false) {
+	function results(matches) {
 		if (!matches.length)
 			return [
 				<div className="faq-state">
@@ -157,9 +169,7 @@ export default function FAQs() {
 			matches.length === 1
 				? "search result label singular"
 				: "search result label plural";
-		const label = searching
-			? strings[key] || defaultStrings[key]
-			: strings.faqs;
+		const label = strings[key] || defaultStrings[key];
 		return [
 			<div className="faq-count" role="status">
 				{`${matches.length} ${label}`}

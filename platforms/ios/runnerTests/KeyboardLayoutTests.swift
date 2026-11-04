@@ -4,6 +4,44 @@ import WebKit
 
 @MainActor
 final class KeyboardLayoutTests: BridgeTestCase {
+    func testPreviewOnlyChangesBottomAnchorWhenKeyboardVisibilityChanges() throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        let controller = PreviewViewController(url: URL(string: "about:blank")!, theme: [:], console: false)
+        window.rootViewController = controller
+        window.isHidden = false
+        defer { window.isHidden = true; window.rootViewController = nil }
+        controller.view.layoutIfNeeded()
+
+        func bottomConstraint() throws -> NSLayoutConstraint {
+            try XCTUnwrap(controller.view.constraints.first {
+                $0.firstItem === controller.content && $0.firstAttribute == .bottom && $0.isActive
+            })
+        }
+        func notify(visible: Bool) {
+            let bounds = controller.view.bounds
+            let frame = CGRect(x: 0, y: visible ? bounds.height / 2 : bounds.height,
+                               width: bounds.width, height: bounds.height / 2)
+            NotificationCenter.default.post(name: UIResponder.keyboardWillChangeFrameNotification, object: nil,
+                userInfo: [UIResponder.keyboardFrameEndUserInfoKey: controller.view.convert(frame, to: window.screen.coordinateSpace),
+                           UIResponder.keyboardAnimationDurationUserInfoKey: 0])
+        }
+
+        notify(visible: false)
+        let hidden = try bottomConstraint()
+        XCTAssertTrue(hidden.secondItem === controller.view.safeAreaLayoutGuide)
+        notify(visible: false)
+        XCTAssertTrue(try bottomConstraint() === hidden)
+        notify(visible: true)
+        let shown = try bottomConstraint()
+        XCTAssertTrue(shown.secondItem === controller.view.keyboardLayoutGuide)
+        notify(visible: true)
+        XCTAssertTrue(try bottomConstraint() === shown)
+        controller.close()
+        notify(visible: false)
+        XCTAssertTrue(try bottomConstraint() === shown)
+    }
+
     func testKeyboardResizeKeepsTheEditorCaretVisible() async throws {
         let webView = try await editorWebView()
         var responder: UIResponder? = webView

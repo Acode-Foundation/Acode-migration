@@ -9,7 +9,7 @@ import { loadSourceModule } from "./loadSourceModule";
 
 createRequire(import.meta.url)("html-tag-js/polyfill");
 
-export default function setup(fetch, localeStrings = strings) {
+export default function setup(fetch, localeStrings = strings, isIOS = false) {
 	const page = document.createElement("section");
 	const header = document.createElement("header");
 	Object.defineProperty(page, "body", {
@@ -56,6 +56,7 @@ export default function setup(fetch, localeStrings = strings) {
 			},
 			"components/searchbar": searchBar,
 			"lib/actionStack": stack,
+			"lib/platform": { isIOS },
 			"lib/config": {
 				BASE_URL: "https://acode.app",
 				API_BASE: "https://acode.app/api",

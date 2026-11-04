@@ -140,14 +140,16 @@
 
       if (!hasES6) {
         setStartupMessage(
-          "Acode requires a modern browser. Please update Android System WebView or Chrome."
+          ios
+            ? "Please update your device software to run Acode."
+            : "Acode requires a modern browser. Please update Android System WebView or Chrome."
         );
       }
 
       window.__ACODE_WEBVIEW_MAJOR__ = getWebViewMajor();
       window.__ACODE_MIN_WEBVIEW_MAJOR__ = MIN_WEBVIEW_MAJOR;
 
-      if (hasES6 &&
+      if (!ios && hasES6 &&
         window.__ACODE_WEBVIEW_MAJOR__ &&
         window.__ACODE_WEBVIEW_MAJOR__ < MIN_WEBVIEW_MAJOR
       ) {
@@ -162,21 +164,29 @@
           reason.name === "FileError" ||
           reason.name === "NotFoundError" ||
           reason.name === "SecurityError" ||
+          reason.name === "QuotaExceededError" ||
           (typeof window.FileError !== "undefined" &&
             reason instanceof window.FileError)
         );
       }
 
+      function startupErrorMessage(reason, message) {
+        if (isStorageError(reason)) {
+          return "Acode failed to start: storage is unavailable. " +
+            (ios
+              ? "Check available storage and reopen Acode. "
+              : "Try restarting your device, or clearing the app data. ") + message;
+        }
+        return "Acode failed to start. " +
+          (ios
+            ? "Close and reopen Acode. If the problem continues, update Acode and your device software. "
+            : "Update Android System WebView or Chrome. ") + message;
+      }
+
       function handleStartupError(event) {
         if (!isStartupLoading()) return;
         var message = event && event.message ? event.message : "Startup error";
-        setStartupMessage(
-          isStorageError(event && event.error)
-            ? "Acode failed to start: storage is unavailable. Try restarting your device, or clearing the app data. " +
-                message
-            : "Acode failed to start. Update Android System WebView or Chrome. " +
-                message
-        );
+        setStartupMessage(startupErrorMessage(event && event.error, message));
       }
 
       function handleStartupRejection(event) {
@@ -184,13 +194,7 @@
         var reason = event && event.reason;
         var message =
           reason && reason.message ? reason.message : "Startup promise failed";
-        setStartupMessage(
-          isStorageError(reason)
-            ? "Acode failed to start: storage is unavailable. Try restarting your device, or clearing the app data. " +
-                message
-            : "Acode failed to start. Update Android System WebView or Chrome. " +
-                message
-        );
+        setStartupMessage(startupErrorMessage(reason, message));
       }
 
       window.addEventListener("error", handleStartupError);

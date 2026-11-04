@@ -20,7 +20,11 @@ test.each([
 		process.execPath,
 		"open",
 	]);
-	expect(result.spawn.mock.calls[1][1][0]).toMatch(/runner\.xcodeproj$/);
+	expect(result.spawn.mock.calls[1][1]).toEqual([
+		"-b",
+		"com.apple.dt.Xcode",
+		expect.stringMatching(/runner\.xcodeproj$/),
+	]);
 	expect(result.log.mock.calls.flat().join("\n")).toContain("Xcode");
 });
 

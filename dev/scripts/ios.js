@@ -112,7 +112,11 @@ function build(options) {
 
 function launch(options, artifact) {
 	if (options.device || !options.target) {
-		run("open", [path.join(root, "platforms/ios/runner.xcodeproj")]);
+		run("open", [
+			"-b",
+			"com.apple.dt.Xcode",
+			path.join(root, "platforms/ios/runner.xcodeproj"),
+		]);
 		console.log(
 			"In Xcode, select the runner scheme and your iPhone, then press Cmd+R to build and install.",
 		);
