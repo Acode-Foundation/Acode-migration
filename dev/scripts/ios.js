@@ -37,6 +37,7 @@ function parseOptions(args) {
 		mode: args.some((arg) => ["p", "prod"].includes(arg)) ? "Release" : "Debug",
 		action: args.includes("test") ? "test" : "build",
 		skipWeb: args.includes("--skip-web"),
+		skipTests: args.filter((arg) => arg.startsWith("-skip-testing:")),
 		device: args.includes("--device"),
 		target: args.find((arg) => arg.startsWith("--target="))?.slice(9),
 	};
@@ -96,6 +97,7 @@ function build(options) {
 					"NO",
 					"-collect-test-diagnostics",
 					"never",
+					...(options.skipTests || []),
 				]
 			: []),
 		options.action,

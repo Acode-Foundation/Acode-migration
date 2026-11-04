@@ -86,6 +86,29 @@ test("a simulator selector cannot silently override physical-device mode", () =>
 	expect(result.error.mock.calls.flat().join("\n")).toMatch(/select.*Xcode/i);
 });
 
+test.each([
+	[],
+	[
+		"-skip-testing:runnerTests/AlpineSignalTests",
+		"-skip-testing:runnerTests/InAppRunnerTests",
+	],
+])("iOS tests forward only explicit exclusions: %j", (...filters) => {
+	const result = runScript([
+		"test",
+		"--target=simulator",
+		"--skip-web",
+		...filters,
+	]);
+	expect(result.process.exitCode).toBeUndefined();
+	const args = result.spawn.mock.calls.find(
+		([command]) => command === "xcodebuild",
+	)[1];
+	expect(args.at(-1)).toBe("test");
+	expect(args.filter((arg) => arg.startsWith("-skip-testing:"))).toEqual(
+		filters,
+	);
+});
+
 function runScript(args) {
 	const spawn = vi.fn(() => ({ status: 0, stdout: "", stderr: "" }));
 	spawn.mockImplementation((command, args) => ({

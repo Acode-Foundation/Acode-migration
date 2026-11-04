@@ -10,9 +10,12 @@ final class WebContextMenuUITests: XCTestCase {
         let header = app.webViews.otherElements["banner"].firstMatch
         XCTAssertTrue(header.waitForExistence(timeout: 20), app.debugDescription)
         header.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
-        XCTAssertTrue(app.webViews.staticTexts["Settings"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.webViews.staticTexts["Save as"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
         let newFiles = app.webViews.staticTexts.matching(identifier: "New file")
-        newFiles.element(boundBy: newFiles.count - 1).tap()
+        let newFile = newFiles.element(boundBy: newFiles.count - 1)
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: newFile)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 5), .completed, app.debugDescription)
+        newFile.tap()
         let input = app.webViews.textFields.firstMatch
         XCTAssertTrue(input.waitForExistence(timeout: 5), app.debugDescription)
         let name = "context-menu-" + UUID().uuidString.prefix(8) + ".html"
