@@ -6,12 +6,15 @@ import XCTest
 final class IapPurchaseUITests: BridgeTestCase {
     private var session: SKTestSession!
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
         let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "Iap", withExtension: "storekit"))
         session = try SKTestSession(contentsOf: url)
         session.resetToDefaultState()
         session.clearTransactions()
         session.disableDialogs = true
+        try await super.setUp()
+        try await reloadWebView(try await appWebView())
+        _ = try await editorWebView()
     }
 
     override func tearDownWithError() throws {
@@ -23,8 +26,7 @@ final class IapPurchaseUITests: BridgeTestCase {
     func testSettingsPurchaseUnlocksProAndShowsFeedbackWithoutReload() async throws {
         let webView = try await editorWebView()
         _ = try await webView.evaluateJavaScript("localStorage.removeItem('acode_pro')")
-        webView.reload()
-        try await Task.sleep(for: .milliseconds(300))
+        try await reloadWebView(webView)
         _ = try await editorWebView()
         let result = try await webView.callAsyncJavaScript("""
             await acode.exec('open','settings');
@@ -62,8 +64,7 @@ final class IapPurchaseUITests: BridgeTestCase {
         let webView = try await editorWebView()
         _ = try await webView.evaluateJavaScript("localStorage.setItem('acode_pro','true')")
         defer { webView.evaluateJavaScript("localStorage.removeItem('acode_pro')") }
-        webView.reload()
-        try await Task.sleep(for: .milliseconds(300))
+        try await reloadWebView(webView)
         _ = try await editorWebView()
         try await session.setSimulatedError(.generic(.userCancelled), forAPI: StoreKitPurchaseAPI())
         let cancelled = try await webView.callAsyncJavaScript("""
@@ -112,8 +113,7 @@ final class IapPurchaseUITests: BridgeTestCase {
             originalScripts.forEach(scripts.addUserScript)
         }
         scripts.addUserScript(WKUserScript(source: "Object.defineProperty(navigator,'onLine',{get:()=>false})", injectionTime: .atDocumentStart, forMainFrameOnly: true))
-        webView.reload()
-        try await Task.sleep(for: .milliseconds(300))
+        try await reloadWebView(webView)
         _ = try await editorWebView()
     }
 }

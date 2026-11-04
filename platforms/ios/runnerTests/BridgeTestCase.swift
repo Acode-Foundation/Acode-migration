@@ -1,5 +1,6 @@
 import XCTest
 import WebKit
+@testable import runner
 
 @MainActor
 class BridgeTestCase: XCTestCase {
@@ -8,19 +9,8 @@ class BridgeTestCase: XCTestCase {
         let marker = "iosConsentFixture"
         let scripts = webView.configuration.userContentController
         guard !scripts.userScripts.contains(where: { $0.source.contains(marker) }) else { return }
-        // Unrelated integration tests must not depend on network consent forms.
-        // Native AdMob actions are still exercised directly by AdsBridgeTests.
-        scripts.addUserScript(WKUserScript(source: """
-            Object.defineProperty(window,'admob',{configurable:true,set(value){
-                value.privacy.gatherConsent=async function iosConsentFixture(){
-                    return {consentStatus:'unknown',canRequestAds:false,privacyOptionsRequired:false};
-                };
-                Object.defineProperty(window,'admob',{configurable:true,writable:true,value});
-            }});
-            """, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-        webView.reload()
-        try await Task.sleep(for: .milliseconds(200))
-        _ = try await appWebView()
+        SimulatorTestSupport.disableConsent(in: scripts)
+        try await reloadWebView(webView)
     }
 
     func appWebView() async throws -> WKWebView {
@@ -43,6 +33,18 @@ class BridgeTestCase: XCTestCase {
             try await Task.sleep(for: .milliseconds(100))
         }
         throw NSError(domain: "AcodeTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Editor startup did not finish"])
+    }
+
+    func reloadWebView(_ webView: WKWebView) async throws {
+        let marker = UUID().uuidString
+        _ = try await webView.evaluateJavaScript("window.iosTestReloadMarker='\(marker)'")
+        webView.reload()
+        for _ in 0..<150 {
+            if !webView.isLoading,
+               (try? await webView.evaluateJavaScript("window.iosTestReloadMarker!=='\(marker)' && !!window.Bridge")) as? Bool == true { return }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        throw NSError(domain: "AcodeTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "App WebView did not finish reloading"])
     }
 
     private func findWebView(_ view: UIView) -> WKWebView? {

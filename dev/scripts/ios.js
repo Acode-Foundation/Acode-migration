@@ -37,6 +37,7 @@ function parseOptions(args) {
 		mode: args.some((arg) => ["p", "prod"].includes(arg)) ? "Release" : "Debug",
 		action: args.includes("test") ? "test" : "build",
 		skipWeb: args.includes("--skip-web"),
+		skipTests: args.filter((arg) => arg.startsWith("-skip-testing:")),
 		device: args.includes("--device"),
 		target: args.find((arg) => arg.startsWith("--target="))?.slice(9),
 	};
@@ -96,6 +97,7 @@ function build(options) {
 					"NO",
 					"-collect-test-diagnostics",
 					"never",
+					...(options.skipTests || []),
 				]
 			: []),
 		options.action,
@@ -112,7 +114,11 @@ function build(options) {
 
 function launch(options, artifact) {
 	if (options.device || !options.target) {
-		run("open", [path.join(root, "platforms/ios/runner.xcodeproj")]);
+		run("open", [
+			"-b",
+			"com.apple.dt.Xcode",
+			path.join(root, "platforms/ios/runner.xcodeproj"),
+		]);
 		console.log(
 			"In Xcode, select the runner scheme and your iPhone, then press Cmd+R to build and install.",
 		);

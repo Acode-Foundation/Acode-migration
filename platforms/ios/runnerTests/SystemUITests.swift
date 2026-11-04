@@ -118,19 +118,25 @@ final class SystemUITests: BridgeTestCase {
         var responder: UIResponder? = webView
         while responder != nil, !(responder is WebViewController) { responder = responder?.next }
         let controller = try XCTUnwrap(responder as? WebViewController)
+        let color = controller.view.backgroundColor
+        let type = controller.themeType
+        // The startup theme timer must not overwrite direct bridge color checks.
+        _ = try await webView.evaluateJavaScript("window.systemThemeFixture=system.setUiTheme;system.setUiTheme=()=>{};true")
+        addTeardownBlock { @MainActor in
+            _ = try await webView.evaluateJavaScript("system.setUiTheme=window.systemThemeFixture;delete window.systemThemeFixture")
+            if let color { controller.setSystemBarColor(color) }
+            controller.setThemeType(type)
+        }
 
         let theme: [String: Any] = ["name": "Fixture", "type": "dark", "version": "free"]
         try await call(webView, action: "set-ui-theme", args: ["#f8f9fa", theme])
-        try await Task.sleep(for: .milliseconds(100))
         XCTAssertEqual(controller.view.backgroundColor, UIColor(hexString: "#f8f9fa"))
 
         // Dialog darkening sends the darkened color as the first argument.
         try await call(webView, action: "set-ui-theme", args: ["#101010", theme])
-        try await Task.sleep(for: .milliseconds(100))
         XCTAssertEqual(controller.view.backgroundColor, UIColor(hexString: "#101010"))
 
         try await call(webView, service: "SystemBarPlugin", action: "setStatusBarBackgroundColor", args: [1, 2, 3])
-        try await Task.sleep(for: .milliseconds(100))
         XCTAssertEqual(controller.view.backgroundColor, UIColor(red: 1.0 / 255, green: 2.0 / 255, blue: 3.0 / 255, alpha: 1))
     }
 

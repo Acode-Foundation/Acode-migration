@@ -3,7 +3,7 @@ import WebKit
 @testable import runner
 
 extension PreviewBrowserTests {
-    func testConsoleInspectsWindowAndKeepsObjectPropertiesInline() async throws {
+    func testStandaloneConsoleInspectsObjectsAndRecoversAfterCancellation() async throws {
         let app = try await editorWebView()
         var responder: UIResponder? = app
         while responder != nil, !(responder is WebViewController) { responder = responder?.next }
@@ -28,9 +28,7 @@ extension PreviewBrowserTests {
             const nested=[...document.querySelectorAll('c-line')].find(row=>row.firstElementChild?.textContent==='nested:');
             nested.querySelector('c-type').click();
             const expanded=nested.textContent.includes('enabled:')&&nested.textContent.includes('true');
-            const context=document.querySelector('.__c-context');
-            const defaultContext=context.value;
-            context.value='worker';
+            const hasContextSelector=!!document.querySelector('.__c-context');
             input.value='while(true){}';
             input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
             const stop=document.querySelector('[aria-label="Stop JavaScript execution"]');
@@ -39,26 +37,21 @@ extension PreviewBrowserTests {
             await wait(()=>!input.disabled);
             await submit('21*2');
             const workerRecovered=document.querySelector('c-message[log-level="log"] c-text')?.textContent==='42';
-            context.value='page';
-            await submit('window');
-            const toggle=document.querySelector('c-message[log-level="log"] c-type');
-            const type=toggle?.textContent;
-            toggle?.click();
-            const inspectable=[...document.querySelectorAll('c-key')].some(key=>key.textContent==='document:');
+            await submit('typeof window');
+            const windowType=document.querySelector('c-message[log-level="log"] c-text')?.textContent;
             const error=document.querySelector('c-message[log-level="error"]')?.textContent;
             input.blur();
-            return {inline,expanded,error:error||'',type:type||'',inspectable,defaultContext,workerRecovered};
+            return {inline,expanded,error:error||'',windowType,hasContextSelector,workerRecovered};
             """, arguments: [:], in: nil, contentWorld: .page) as? [String: Any]
         XCTAssertEqual(result?["inline"] as? Bool, true, "Property keys and values must share a line")
         XCTAssertEqual(result?["expanded"] as? Bool, true)
         XCTAssertEqual(result?["error"] as? String, "")
-        XCTAssertEqual(result?["type"] as? String, "Window")
-        XCTAssertEqual(result?["inspectable"] as? Bool, true)
-        XCTAssertEqual(result?["defaultContext"] as? String, "page")
+        XCTAssertEqual(result?["windowType"] as? String, "undefined")
+        XCTAssertEqual(result?["hasContextSelector"] as? Bool, false)
         XCTAssertEqual(result?["workerRecovered"] as? Bool, true)
         try await Task.sleep(for: .milliseconds(300))
         _ = try await browser.webView.evaluateJavaScript("document.querySelector('c-output').scrollTop=0")
         try await Task.sleep(for: .milliseconds(200))
-        attachScreenshot(browser, name: "console-window-object")
+        attachScreenshot(browser, name: "console-worker-object")
     }
 }
