@@ -20,10 +20,10 @@ describe("iosGuestPath", () => {
 		expect(iosGuestPath(url)).toBe(expected);
 	});
 
-	it("decodes Alpine URLs exactly once", () => {
-		const url = `alpine://localhost/root/${encodeURIComponent("a b#1%20")}`;
+	it("decodes Ubuntu URLs exactly once", () => {
+		const url = `ubuntu://localhost/root/${encodeURIComponent("a b#1%20")}`;
 		expect(iosGuestPath(url)).toBe("/root/a b#1%20");
-		expect(iosGuestPath("alpine://localhost")).toBe("/");
+		expect(iosGuestPath("ubuntu://localhost")).toBe("/");
 	});
 
 	it("matches Terminal Public when the native URL is encoded", () => {

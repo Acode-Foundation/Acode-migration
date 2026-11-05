@@ -168,8 +168,9 @@
   },
   "browserslist": "cover 100%",
   "allowScripts": {
-    "@parcel/watcher@2.5.6": true,
-    "core-js@3.49.0": true,
-    "core-js-pure@3.49.0": true
+    "file:../../codemirror-lsp-client": true,
+    "@parcel/watcher@2.6.0": true,
+    "core-js@3.50.0": true,
+    "core-js-pure@3.50.0": true
   }
 }

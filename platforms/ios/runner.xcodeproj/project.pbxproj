@@ -148,7 +148,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 12D2F2FE2F843F20000D37BC /* Build configuration list for PBXNativeTarget "runner" */;
 			buildPhases = (
-				AC0DE7000000000000000001 /* Build Alpine */,
+				AC0DE7000000000000000001 /* Build Ubuntu */,
 				12D2F2EF2F843F1F000D37BC /* Sources */,
 				12D2F2F02F843F1F000D37BC /* Frameworks */,
 				12D2F2F12F843F1F000D37BC /* Resources */,
@@ -283,7 +283,7 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		AC0DE7000000000000000001 /* Build Alpine */ = {
+		AC0DE7000000000000000001 /* Build Ubuntu */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
@@ -291,13 +291,13 @@
 			);
 			inputPaths = (
 			);
-			name = "Build Alpine";
+			name = "Build Ubuntu";
 			outputPaths = (
-				"$(DERIVED_FILE_DIR)/Alpine-$(PLATFORM_NAME)/libAcodeAlpine.a",
+				"$(DERIVED_FILE_DIR)/Ubuntu-$(PLATFORM_NAME)/libAcodeUbuntu.a",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
-			shellScript = "\"$PROJECT_DIR/Alpine/build.sh\"";
+			shellScript = "\"$PROJECT_DIR/Ubuntu/build.sh\"";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -472,7 +472,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = DEADBEEF1234DEADBEEF1234 /* Config.xcconfig */;
 			buildSettings = {
-				ALPINE_LDFLAGS = "-lAcodeAlpine -lsqlite3 -lz -lbz2 -llzma -liconv -lxml2";
+				UBUNTU_LDFLAGS = "-lAcodeUbuntu -lsqlite3 -lz -lbz2 -llzma -liconv -lxml2";
 				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = runner;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -491,12 +491,12 @@
 				);
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
-					"$(DERIVED_FILE_DIR)/Alpine-$(PLATFORM_NAME)",
+					"$(DERIVED_FILE_DIR)/Ubuntu-$(PLATFORM_NAME)",
 				);
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
-					"$(ALPINE_LDFLAGS)",
+					"$(UBUNTU_LDFLAGS)",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = app.acode;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -507,7 +507,7 @@
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_INCLUDE_PATHS = "$(inherited) $(PROJECT_DIR)/Alpine/include";
+				SWIFT_INCLUDE_PATHS = "$(inherited) $(PROJECT_DIR)/Ubuntu/include";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -518,7 +518,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = DEADBEEF1234DEADBEEF1234 /* Config.xcconfig */;
 			buildSettings = {
-				ALPINE_LDFLAGS = "-lAcodeAlpine -lsqlite3 -lz -lbz2 -llzma -liconv -lxml2";
+				UBUNTU_LDFLAGS = "-lAcodeUbuntu -lsqlite3 -lz -lbz2 -llzma -liconv -lxml2";
 				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = runner;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -537,12 +537,12 @@
 				);
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
-					"$(DERIVED_FILE_DIR)/Alpine-$(PLATFORM_NAME)",
+					"$(DERIVED_FILE_DIR)/Ubuntu-$(PLATFORM_NAME)",
 				);
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
-					"$(ALPINE_LDFLAGS)",
+					"$(UBUNTU_LDFLAGS)",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = app.acode;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -553,7 +553,7 @@
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_INCLUDE_PATHS = "$(inherited) $(PROJECT_DIR)/Alpine/include";
+				SWIFT_INCLUDE_PATHS = "$(inherited) $(PROJECT_DIR)/Ubuntu/include";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -569,7 +569,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = app.acode.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
-				SWIFT_INCLUDE_PATHS = "$(inherited) $(PROJECT_DIR)/Alpine/include";
+				SWIFT_INCLUDE_PATHS = "$(inherited) $(PROJECT_DIR)/Ubuntu/include";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/runner.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/runner";
@@ -585,7 +585,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = app.acode.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
-				SWIFT_INCLUDE_PATHS = "$(inherited) $(PROJECT_DIR)/Alpine/include";
+				SWIFT_INCLUDE_PATHS = "$(inherited) $(PROJECT_DIR)/Ubuntu/include";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/runner.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/runner";
@@ -600,7 +600,7 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				PRODUCT_BUNDLE_IDENTIFIER = "app.acode.ui-tests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_INCLUDE_PATHS = "$(inherited) $(PROJECT_DIR)/Alpine/include";
+				SWIFT_INCLUDE_PATHS = "$(inherited) $(PROJECT_DIR)/Ubuntu/include";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_TARGET_NAME = runner;
@@ -615,7 +615,7 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				PRODUCT_BUNDLE_IDENTIFIER = "app.acode.ui-tests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_INCLUDE_PATHS = "$(inherited) $(PROJECT_DIR)/Alpine/include";
+				SWIFT_INCLUDE_PATHS = "$(inherited) $(PROJECT_DIR)/Ubuntu/include";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_TARGET_NAME = runner;

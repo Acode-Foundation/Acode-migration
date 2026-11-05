@@ -400,27 +400,33 @@ export default function terminalSettings() {
 
 			sdcard.openDocumentFile(
 				async (data) => {
-					loader.showTitleLoader();
-					//this will create a file at $PREFIX/atem_backup.tar.tar
-					await system.copyToUri(
-						data.uri,
-						Bridge.file.dataDirectory,
-						"aterm_backup.tar",
-						console.log,
-						console.error,
-					);
+					try {
+						loader.showTitleLoader();
+						//this will create a file at $PREFIX/atem_backup.tar.tar
+						await system.copyToUri(
+							data.uri,
+							Bridge.file.dataDirectory,
+							"aterm_backup.tar",
+							console.log,
+							console.error,
+						);
 
-					// Restore
-					await Terminal.restore();
+						// Restore
+						await Terminal.restore();
 
-					//Cleanup restore file
-					await clearBackup();
+						//Cleanup restore file
+						await clearBackup();
 
-					loader.removeTitleLoader();
-					alert(
-						strings.success.toUpperCase(),
-						`${strings["restored successfully"]}.`,
-					);
+						loader.removeTitleLoader();
+						alert(
+							strings.success.toUpperCase(),
+							`${strings["restored successfully"]}.`,
+						);
+					} catch (error) {
+						loader.removeTitleLoader();
+						console.error("Terminal restore failed:", error);
+						toast(error.toString());
+					}
 				},
 				(error) => {
 					if (helpers.isCancelled(error)) return;

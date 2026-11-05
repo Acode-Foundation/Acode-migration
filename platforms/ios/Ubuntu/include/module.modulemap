@@ -1,0 +1,4 @@
+module AcodeUbuntu {
+    header "AcodeUbuntu.h"
+    export *
+}

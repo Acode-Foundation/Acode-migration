@@ -20,7 +20,7 @@ An iOS port is in progress using the same editor and plugin APIs with Swift nati
 - Seamlessly modify source files for various languages like Python, Java, JavaScript, and more.
 - Built-in javascript console
 - S/FTP and SSH terminal integration
-- Built-in terminal(Alpine)
+- Built-in terminal (Ubuntu)
 - Enjoy multi-language editing support with easy management tools.
 - Enjoy a large collections of community plugins to enhance your coding experience.
 
@@ -93,4 +93,4 @@ For plugin development information, refer to: [Acode Plugin Documentation](https
  </picture>
 </a>
 
-The iOS terminal uses an ARM64 Alpine emulator with the existing terminal UI and AXS server. See [runtime sources, build requirements, and compatibility limits](platforms/ios/Alpine/README.md).
+The iOS terminal runs the same ARM64 Ubuntu rootfs as Android in an emulator, with the existing terminal UI and AXS server. See [runtime sources, build requirements, and compatibility limits](platforms/ios/Ubuntu/README.md).

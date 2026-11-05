@@ -122,6 +122,11 @@ cd Acode
 # Install dependencies
 npm ci
 
+# Allow the install scripts npm blocks by default (builds the local
+# @codemirror/lsp-client, the @parcel/watcher native module, and core-js)
+npm install-scripts approve codemirror-lsp-client @parcel/watcher core-js core-js-pure
+npm ci
+
 # Build the APK
 npm run build -- dev apk
 ```
@@ -130,6 +135,10 @@ The APK will be at: `platforms/android/app/build/outputs/apk/<edition>/debug/app
 
 > [!NOTE]
 > `@codemirror/lsp-client` comes from the `codemirror-lsp-client` git submodule and is installed as a local `file:` dependency, so initialize the submodule before running `npm ci` — see [Troubleshooting](#-troubleshooting).
+>
+> npm's `allowScripts` feature blocks the dependency's `prepare` script, which
+> generates its `dist/index.js` entry point. Approve the scripts before
+> installing — see [Troubleshooting](#-troubleshooting).
 
 ## iOS development (port in progress)
 
@@ -342,7 +351,8 @@ their file URIs; parsing them as URL text loses literal filename characters.
 
 - `platforms/android/app/src/main/java`: Acode runtime and shared native services.
 - `platforms/android/app/src/free`: advertising implementation and metadata.
-- `platforms/android/app/src/store`: billing and proot assets, excluded by `fdroid`.
+- `platforms/android/app/src/store`: billing, the AXS binary and sandbox rootfs assets, excluded by `fdroid`.
+- `platforms/android/proot`: PRoot and its loaders, compiled from the in-tree C sources with the NDK for every flavor.
 - `src/native`: typed native APIs imported by `src/native/index.ts`; `bridge(service)` binds promise-based actions to the shared transport.
 - `src/platforms/android` and `src/platforms/ios`: platform transports using the shared callback and binary protocol.
 - `platforms/ios`: iOS app, with the template's runtime in `runner` and native services in `runner/lib`. Simulator tests and native dependencies remain alongside the app. See the [port checklist](docs/ios-port.md) for remaining work.
@@ -371,7 +381,7 @@ Gradle only compiles native source and packages the compiled web assets; no Java
 Paid builds exclude the AdMob native sources, Google ads/consent SDKs, manifest entries,
 and JavaScript bridge. The editor uses small inactive ads APIs in paid builds, so
 AdMob initialization, consent and rewarded-ad implementation are not bundled either.
-Shared billing and proot remain available unless `fdroid` is requested.
+Shared billing remains available unless `fdroid` is requested; PRoot is compiled from source for every flavor.
 
 ```bash
 npm run build -- dev apk
@@ -399,6 +409,19 @@ If dependency installation fails because it is missing, initialize it first:
 
 ```bash
 git submodule update --init --recursive
+npm ci
+```
+
+### Blocked install scripts (`Module not found: Can't resolve '@codemirror/lsp-client'`)
+
+npm's `allowScripts` security feature blocks install scripts by default. For this
+project that includes the `prepare` script of the local `@codemirror/lsp-client`
+dependency, which generates its `dist/index.js` entry point. If the build fails
+with a missing `@codemirror/lsp-client` module (or a missing `@parcel/watcher`
+native module), approve the scripts and reinstall:
+
+```bash
+npm install-scripts approve codemirror-lsp-client @parcel/watcher core-js core-js-pure
 npm ci
 ```
 
@@ -489,8 +512,8 @@ To create plugins for Acode:
 - [Plugin Starter Repository](https://github.com/Acode-Foundation/acode-plugin)
 - [Plugin Documentation](https://docs.acode.app/)
 
-### iOS Alpine terminal
+### iOS Ubuntu terminal
 
-Install `brew install meson ninja llvm lld` on an Apple Silicon Mac before building iOS. The normal scripts and direct Xcode builds compile the vendored runtime automatically. `Config.xcconfig` remains limited to ignored local signing information. See [Alpine runtime documentation](platforms/ios/Alpine/README.md) for source revisions, local adaptations, licensing, filesystem layout, and compatibility limits.
+Install `brew install meson ninja llvm lld` on an Apple Silicon Mac before building iOS. The normal scripts and direct Xcode builds compile the vendored runtime automatically. `Config.xcconfig` remains limited to ignored local signing information. See [Ubuntu runtime documentation](platforms/ios/Ubuntu/README.md) for source revisions, local adaptations, licensing, filesystem layout, and compatibility limits.
 
-The `AlpineTerminalTests`, `AlpineInteractionTests`, `AlpinePackageTests`, and `AlpineLspTests` suites exercise the real WebView bridge, installation, filesystem editing, backup/restore, interactive tabs, Node/npm, and the existing JSON language server. Installation and package tests require access to Alpine and npm repositories. Run them on a dedicated simulator because they install packages and restore its terminal filesystem. Keep physical-device performance and background validation separate from simulator results.
+The `UbuntuTerminalTests`, `UbuntuInteractionTests`, `UbuntuPackageTests`, and `UbuntuLspTests` suites exercise the real WebView bridge, installation, filesystem editing, backup/restore, interactive tabs, Node/npm, and the existing JSON language server. Installation and package tests require access to the Ubuntu, NodeSource and npm repositories. Run them on a dedicated simulator because they install packages and restore its terminal filesystem. Keep physical-device performance and background validation separate from simulator results.

@@ -1,10 +1,10 @@
-import AcodeAlpine
+import AcodeUbuntu
 import Foundation
 
 class ExecutorService: BaseService {
     var background: Bool { false }
-    private let runtime = AlpineRuntime.shared
-    private var streams: [AlpineStreamServer] = []
+    private let runtime = UbuntuRuntime.shared
+    private var streams: [UbuntuStreamServer] = []
 
     override func exec(action: String, args: [Any], callback: Callback) {
         runtime.queue.async { [self] in
@@ -22,18 +22,18 @@ class ExecutorService: BaseService {
                     callback.success()
                 case "stop": runtime.stop(value); callback.success()
                 case "isRunning":
-                    callback.success(runtime.processes[value].map { alpine_running($0.pid) } == true ? "running" : "stopped")
+                    callback.success(runtime.processes[value].map { ubuntu_running($0.pid) } == true ? "running" : "stopped")
                 case "listProcesses": callback.success(runtime.processes.values.filter { $0.background == background && $0.status == nil }.map(\.info))
                 case "listAllProcesses": try listAllProcesses(callback)
                 case "killProcess":
                     guard let pid = args[safe: 0] as? Int, pid > 1 else { throw terminalError("Invalid process") }
-                    guard alpine_kill(Int32(pid)) == 0 else { throw terminalError("Process not running") }
+                    guard ubuntu_kill(Int32(pid)) == 0 else { throw terminalError("Process not running") }
                     callback.success()
                 case "stopService": runtime.stopAll(background: background); callback.success()
                 case "setProotDebug", "moveToForeground", "moveToBackground": callback.success()
                 case "spawn":
                     guard let command = args[safe: 0] as? [String], !command.isEmpty else { throw terminalError("Command is required") }
-                    let server = try AlpineStreamServer(command: command, callback: callback)
+                    let server = try UbuntuStreamServer(command: command, callback: callback)
                     streams.append(server)
                     server.onStop = { [weak self, weak server] in
                         self?.runtime.queue.async { self?.streams.removeAll { $0 === server } }
@@ -56,14 +56,15 @@ class ExecutorService: BaseService {
     }
 
     private func listAllProcesses(_ callback: Callback) throws {
-        try runtime.start("busybox ps -o pid,ppid,comm,args", completion: { status, output, errors in
-            guard status == 0 else { callback.error(errors); return }
-            let rows: [[String: Any]] = output.split(separator: "\n").dropFirst().compactMap { line in
-                let fields = line.split(maxSplits: 3, whereSeparator: \.isWhitespace)
-                guard fields.count >= 3, let pid = Int(fields[0]), let parent = Int(fields[1]) else { return nil }
-                return ["pid": pid, "ppid": parent, "name": String(fields[2]),
-                        "command": fields.count > 3 ? String(fields[3]) : String(fields[2]),
-                        "state": "", "memory": 0, "isSelf": pid == 1]
+        // The emulator does not account resident memory, so RSS is not requested.
+        try runtime.start("ps -eo pid=,ppid=,stat=,comm=,args=", completion: { status, output, errors in
+            guard status == 0 else { callback.error(errors.isEmpty ? "ps exited with status \(status)" : errors); return }
+            let rows: [[String: Any]] = output.split(separator: "\n").compactMap { line in
+                let fields = line.split(maxSplits: 4, whereSeparator: \.isWhitespace)
+                guard fields.count >= 4, let pid = Int(fields[0]), let parent = Int(fields[1]) else { return nil }
+                return ["pid": pid, "ppid": parent, "name": String(fields[3]),
+                        "command": fields.count > 4 ? String(fields[4]) : String(fields[3]),
+                        "state": String(fields[2]), "memory": 0, "isSelf": pid == 1]
             }
             callback.success(rows)
         })

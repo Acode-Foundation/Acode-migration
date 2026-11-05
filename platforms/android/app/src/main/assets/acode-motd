@@ -1,0 +1,8 @@
+Welcome to Ubuntu Linux in Acode!
+
+Working with packages:
+
+ - Search:    apt search <query>
+ - Install:   apt install <package>
+ - Uninstall: apt remove <package>
+ - Upgrade:   apt update && apt upgrade
