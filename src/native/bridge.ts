@@ -37,12 +37,17 @@ export default function bridge(service: string) {
 export function createTransport(send: NativeSender) {
 	const callbacks = new Map<
 		number,
-		{ success: NativeCallback; error: NativeCallback }
+		{
+			success: NativeCallback;
+			error: NativeCallback;
+			service: string;
+			action: string;
+		}
 	>();
 	let callbackId = 0;
 	const exec: NativeExec = (success, error, service, action, args = []) => {
 		const id = ++callbackId;
-		callbacks.set(id, { success, error });
+		callbacks.set(id, { success, error, service, action });
 		try {
 			const encoded = args.map((value) =>
 				Object.prototype.toString.call(value) === "[object ArrayBuffer]"
@@ -65,15 +70,47 @@ export function createTransport(send: NativeSender) {
 		if (!callback) return;
 		if (!keep) callbacks.delete(id);
 		if (status === 0) return;
-		const listener = status === 1 ? callback.success : callback.error;
 		const payload = data as { kind?: string; data?: unknown[] } | undefined;
-		listener?.(
-			...(payload?.kind === "multipart"
+		const values =
+			payload?.kind === "multipart"
 				? payload.data!.map(decode)
-				: [decode(data)]),
+				: [decode(data)];
+
+		if (status === 1) {
+			callback.success?.(...values);
+			return;
+		}
+
+		// Never surface a bare action name: augment it with context so the user
+		// and the logs can tell which native call actually failed.
+		const failure = describeNativeFailure(
+			callback.service,
+			callback.action,
+			values,
 		);
+		callback.error?.(failure, ...values.slice(1));
 	};
 	return { exec, receive };
+}
+
+function describeNativeFailure(
+	service: string,
+	action: string,
+	values: unknown[],
+): unknown {
+	const raw = values[0];
+	// Structured error payloads (HTTP responses, results objects) carry data the
+	// callers consume, so only textual errors may be rewritten.
+	if (raw != null && typeof raw !== "string") return raw;
+
+	const message = typeof raw === "string" ? raw.trim() : "";
+	if (!message) {
+		return `${service}.${action} failed without an error message`;
+	}
+	if (message === action || message === `${service}.${action}`) {
+		return `${service}.${action} is not handled by the app`;
+	}
+	return raw;
 }
 
 function decode(value: unknown): unknown {

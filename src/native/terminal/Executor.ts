@@ -5,7 +5,7 @@ export interface ProcessInfo {
 	id: string;
 	pid: number;
 	command: string;
-	alpine: boolean;
+	ubuntu: boolean;
 	startedAt: number;
 	background: boolean;
 }
@@ -48,7 +48,7 @@ class Executor {
 	start(
 		command: string,
 		onData: OutputListener,
-		alpine = false,
+		ubuntu = false,
 	): Promise<string> {
 		return new Promise((resolve, reject) => {
 			let first = true;
@@ -66,7 +66,7 @@ class Executor {
 				reject,
 				this.ExecutorType,
 				"start",
-				[command, String(alpine)],
+				[command, String(ubuntu)],
 			);
 		});
 	}
@@ -100,8 +100,8 @@ class Executor {
 	stopService() {
 		return this.call<string>("stopService");
 	}
-	execute(command: string, alpine = false) {
-		return this.call<string>("exec", [command, String(alpine)]);
+	execute(command: string, ubuntu = false) {
+		return this.call<string>("exec", [command, String(ubuntu)]);
 	}
 	loadLibrary(path: string) {
 		return this.call<string>("loadLibrary", [path]);
