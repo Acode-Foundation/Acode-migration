@@ -629,6 +629,7 @@ it.each([
 		placeholder,
 		createEditorReadOnlyExtension,
 		blurEditorIfReadOnly,
+		canvasRenderer: false,
 		loadingPreviews,
 		manager: { activeFile: file },
 		touchSelectionController: null,
