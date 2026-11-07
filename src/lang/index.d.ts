@@ -253,6 +253,9 @@ declare type LangStrings = {
 	"download acode pro": string;
 	"loading plugins": string;
 	faqs: string;
+	"faqs load failed": string;
+	"faqs empty": string;
+	retry: string;
 	feedback: string;
 	header: string;
 	sidebar: string;

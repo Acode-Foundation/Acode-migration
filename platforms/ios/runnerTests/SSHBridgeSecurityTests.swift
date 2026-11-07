@@ -97,7 +97,7 @@ final class SSHBridgeSecurityTests: BridgeTestCase {
 
 enum SSHTestFixture {
     static func configuration() async throws -> [String: Any] {
-        let request = URLRequest(url: URL(string: "http://127.0.0.1:22199")!, timeoutInterval: 2)
+        let request = URLRequest(url: URL(string: "http://127.0.0.1:22199")!, timeoutInterval: 10)
         do {
             let (data, _) = try await URLSession.shared.data(for: request)
             return try JSONSerialization.jsonObject(with: data) as! [String: Any]

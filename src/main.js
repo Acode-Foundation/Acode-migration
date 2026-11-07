@@ -695,7 +695,7 @@ async function loadApp() {
 			onclick={() =>
 				alert(
 					"iOS terminal",
-					"The iOS terminal runs Linux commands through emulation. Commands and tools can be slower than on Android or a desktop, especially when starting or doing intensive work.",
+					"The iOS terminal runs Linux commands through emulation. Commands and tools may take longer to start or complete intensive work.",
 				)
 			}
 		/>

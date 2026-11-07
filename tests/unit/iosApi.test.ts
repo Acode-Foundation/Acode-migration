@@ -77,17 +77,35 @@ test("only routes Acode HTTPS API requests through the iOS transport", async () 
 		"http://acode.app/api/login",
 		"https://acode.app:8443/api/login",
 		"https://acode.app/plugins",
+		"https://dev.acode.app.evil.test/api/login",
+		"http://dev.acode.app/api/login",
+		"https://dev.acode.app:8443/api/login",
 		"acode://localhost/__cdvfile_cache__/file.txt",
 	]) {
 		await window.fetch(url);
 		expect(transport.mock.calls.at(-1)?.[0]).toBe(url);
 	}
-	await window.fetch("https://acode.app/api/login?test=one%20two", {
-		credentials: "include",
-	});
-	const [url, options] = transport.mock.calls.at(-1)!;
-	expect(url).toBe("acode://localhost/__api__/login?test=one%20two");
-	expect(options.headers.get("X-Acode-Credentials")).toBe("include");
+	for (const origin of ["https://acode.app", "https://dev.acode.app"]) {
+		await window.fetch(`${origin}/api/login?test=one%20two`, {
+			credentials: "include",
+			headers: { "X-Acode-API-Origin": "https://example.com" },
+		});
+		const [url, options] = transport.mock.calls.at(-1)!;
+		expect(url).toBe("acode://localhost/__api__/login?test=one%20two");
+		expect(options.headers.get("X-Acode-Credentials")).toBe("include");
+		expect(options.headers.get("X-Acode-API-Origin")).toBe(origin);
+		const xhr = new XMLHttpRequest();
+		xhr.open("GET", `${origin}/api/login`);
+		xhr.withCredentials = true;
+		xhr.send();
+		const state = xhr as unknown as {
+			openArgs: unknown[];
+			headers: Record<string, string>;
+		};
+		expect(state.openArgs[1]).toBe("acode://localhost/__api__/login");
+		expect(state.headers["X-Acode-API-Origin"]).toBe(origin);
+		expect(state.headers["X-Acode-Credentials"]).toBe("include");
+	}
 });
 
 test("retains Request bodies, content types, cancellation and response URLs", async () => {

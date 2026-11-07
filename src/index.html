@@ -63,26 +63,6 @@
       text-align: left;
     }
 
-    .splash-beta {
-      display: none;
-      position: absolute;
-      top: calc(50% + 110px);
-      left: 50%;
-      transform: translateX(-50%);
-      padding: 4px 12px;
-      border: 1px solid currentColor;
-      border-radius: 16px;
-      color: var(--primary-text-color, rgb(209, 209, 209));
-      background-color: var(--secondary-color, #20202c);
-      font: 600 11px/1.4 sans-serif;
-      letter-spacing: 1px;
-      text-transform: uppercase;
-    }
-
-    html[data-platform="ios"] .splash-beta {
-      display: inline-block;
-    }
-
     .splash-message {
       position: absolute;
       bottom: 15px;
@@ -160,14 +140,16 @@
 
       if (!hasES6) {
         setStartupMessage(
-          "Acode requires a modern browser. Please update Android System WebView or Chrome."
+          ios
+            ? "Please update your device software to run Acode."
+            : "Acode requires a modern browser. Please update Android System WebView or Chrome."
         );
       }
 
       window.__ACODE_WEBVIEW_MAJOR__ = getWebViewMajor();
       window.__ACODE_MIN_WEBVIEW_MAJOR__ = MIN_WEBVIEW_MAJOR;
 
-      if (hasES6 &&
+      if (!ios && hasES6 &&
         window.__ACODE_WEBVIEW_MAJOR__ &&
         window.__ACODE_WEBVIEW_MAJOR__ < MIN_WEBVIEW_MAJOR
       ) {
@@ -182,21 +164,29 @@
           reason.name === "FileError" ||
           reason.name === "NotFoundError" ||
           reason.name === "SecurityError" ||
+          reason.name === "QuotaExceededError" ||
           (typeof window.FileError !== "undefined" &&
             reason instanceof window.FileError)
         );
       }
 
+      function startupErrorMessage(reason, message) {
+        if (isStorageError(reason)) {
+          return "Acode failed to start: storage is unavailable. " +
+            (ios
+              ? "Check available storage and reopen Acode. "
+              : "Try restarting your device, or clearing the app data. ") + message;
+        }
+        return "Acode failed to start. " +
+          (ios
+            ? "Close and reopen Acode. If the problem continues, update Acode and your device software. "
+            : "Update Android System WebView or Chrome. ") + message;
+      }
+
       function handleStartupError(event) {
         if (!isStartupLoading()) return;
         var message = event && event.message ? event.message : "Startup error";
-        setStartupMessage(
-          isStorageError(event && event.error)
-            ? "Acode failed to start: storage is unavailable. Try restarting your device, or clearing the app data. " +
-                message
-            : "Acode failed to start. Update Android System WebView or Chrome. " +
-                message
-        );
+        setStartupMessage(startupErrorMessage(event && event.error, message));
       }
 
       function handleStartupRejection(event) {
@@ -204,13 +194,7 @@
         var reason = event && event.reason;
         var message =
           reason && reason.message ? reason.message : "Startup promise failed";
-        setStartupMessage(
-          isStorageError(reason)
-            ? "Acode failed to start: storage is unavailable. Try restarting your device, or clearing the app data. " +
-                message
-            : "Acode failed to start. Update Android System WebView or Chrome. " +
-                message
-        );
+        setStartupMessage(startupErrorMessage(reason, message));
       }
 
       window.addEventListener("error", handleStartupError);
@@ -226,7 +210,6 @@
 
 <body class="loading" data-version="" data-small-msg="">
   <div id="splash">
-    <span class="splash-beta">Beta</span>
     <div class="splash-version"></div>
     <div class="splash-message"></div>
   </div>

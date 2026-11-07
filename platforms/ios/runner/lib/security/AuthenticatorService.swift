@@ -36,23 +36,35 @@ private final class SignInCoordinator: NSObject, ASWebAuthenticationPresentation
 
     func exec(action: String, args: [Any], callback: Callback) {
         switch action {
-        case "login":
+        case "login", "openAccount":
             cancel()
             do {
                 let options = args[safe: 0] as? [String: Any] ?? [:]
-                let url = try auth.begin(baseURL: options["baseUrl"] as? String ?? AppAuthentication.origin, version: options["appVersionCode"] as? Int ?? 0)
+                let account = action == "openAccount"
+                let baseURL = options["baseUrl"] as? String ?? AppAuthentication.origin
+                let url = try account ? AppAuthentication.accountURL(baseURL: baseURL) : auth.begin(baseURL: baseURL, version: options["appVersionCode"] as? Int ?? 0)
                 self.callback = callback
                 let id = operation
                 let session = ASWebAuthenticationSession(url: url, callbackURLScheme: "acode") { [weak self] url, error in
                     Task { @MainActor in
                         guard let self, self.operation == id else { return }
-                        if let url { self.receive(url) }
+                        if account {
+                            if let error, (error as? ASWebAuthenticationSessionError)?.code != .canceledLogin {
+                                self.fail(error.localizedDescription); return
+                            }
+                            self.callback = nil; self.session = nil
+                            callback.success()
+                        }
+                        else if let url { self.receive(url) }
+                        else if (error as? ASWebAuthenticationSessionError)?.code == .canceledLogin {
+                            self.fail("Sign-in was cancelled. You can try again.")
+                        }
                         else { self.fail(error?.localizedDescription ?? "Sign-in cancelled") }
                     }
                 }
                 session.presentationContextProvider = self
                 self.session = session
-                if !session.start() { fail("Unable to open sign-in") }
+                if !session.start() { fail(account ? "Unable to open account settings" : "Unable to open sign-in") }
             } catch { self.callback = nil; callback.error(error.localizedDescription) }
         case "saveToken", "logout":
             cancel()
@@ -76,7 +88,7 @@ private final class SignInCoordinator: NSObject, ASWebAuthenticationPresentation
             let transport = HTTPTransport(request: request, followRedirects: false, connectTimeout: 15, readTimeout: 30)
             var data = Data()
             transport.onResponse = { response in
-                guard (200..<300).contains(response.statusCode) else { throw SecretFailure("Unable to complete sign-in") }
+                guard (200..<300).contains(response.statusCode) else { throw AppAuthentication.exchangeFailure(response) }
             }
             transport.onData = { bytes in
                 guard data.count + bytes.count <= 65536 else { throw SecretFailure("Invalid sign-in response") }
@@ -86,15 +98,17 @@ private final class SignInCoordinator: NSObject, ASWebAuthenticationPresentation
                 Task { @MainActor in
                     guard let self, self.operation == id else { return }
                     do {
-                        if error != nil { throw SecretFailure("Unable to complete sign-in") }
+                        if let error { throw error }
                         let response = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-                        try self.auth.save(response?["token"] as? String ?? "")
+                        try self.auth.save(response?["token"] as? String ?? "", for: request.url!)
                         if let store = self.bridge?.webView?.configuration.websiteDataStore.httpCookieStore { try await self.auth.synchronizeCookies(store) }
                         guard self.operation == id else { return }
                         let callback = self.callback
                         self.callback = nil; self.exchange = nil; self.session = nil
                         callback?.success()
-                    } catch { self.fail("Unable to complete sign-in") }
+                    } catch {
+                        self.fail((error as? SecretFailure)?.message ?? "Sign-in could not be completed. Please check your connection and try again.")
+                    }
                 }
             }
             exchange = transport
