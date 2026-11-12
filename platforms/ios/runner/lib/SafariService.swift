@@ -31,9 +31,10 @@ final class SafariService: BaseService, SFSafariViewControllerDelegate {
             }
             return
         }
-        guard let value = args[safe: 0] as? String, let url = URL(string: value), let scheme = url.scheme?.lowercased() else {
+        guard let value = args[safe: 0] as? String, let inputURL = URL(string: value), let scheme = inputURL.scheme?.lowercased() else {
             callback.error("Invalid browser URL"); return
         }
+        let url = Self.websiteURL(inputURL)
         if action == "external" {
             guard !["javascript", "data", "file", "acode", "about"].contains(scheme) else { callback.error("Unsupported external URL"); return }
             DispatchQueue.main.async {
@@ -87,5 +88,18 @@ final class SafariService: BaseService, SFSafariViewControllerDelegate {
         openCallback = nil
         lifecycleCallback?.success(["type": "closed"])
         lifecycleCallback = nil
+    }
+
+    static func websiteURL(_ url: URL) -> URL {
+        guard url.scheme?.lowercased() == "https",
+              ["acode.app", "dev.acode.app"].contains(url.host?.lowercased() ?? ""),
+              url.port == nil || url.port == 443,
+              url.user == nil, url.password == nil,
+              var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+        var query = components.percentEncodedQuery?.components(separatedBy: "&") ?? []
+        query.removeAll { $0.components(separatedBy: "=").first?.removingPercentEncoding == "src" }
+        query.append("src=ios")
+        components.percentEncodedQuery = query.joined(separator: "&")
+        return components.url ?? url
     }
 }

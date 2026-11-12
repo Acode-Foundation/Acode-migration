@@ -24,6 +24,11 @@ final class WebViewController: UIViewController {
         config.setURLSchemeHandler(AppURLSchemeHandler(), forURLScheme: "acode")
 
         let contentController = WKUserContentController()
+        #if DEBUG && targetEnvironment(simulator)
+        if ProcessInfo.processInfo.arguments.contains("-acode-ui-testing") {
+            SimulatorTestSupport.disableConsent(in: contentController)
+        }
+        #endif
         WebShadowCaret.install(on: contentController)
         contentController.add(WeakScriptMessageHandler(bridge), name: "exec")
         config.userContentController = contentController

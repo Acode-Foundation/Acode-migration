@@ -9,7 +9,6 @@ final class PreviewTransferTests: BridgeTestCase {
         try await server.start()
         defer { server.stop() }
         let browser = try await presentBrowser(server.origin + "/preview-transfers")
-        try await waitForPage(browser.webView)
         _ = try await browser.webView.evaluateJavaScript("document.querySelector('a').click()")
         for _ in 0..<100 {
             if browser.pendingDialog != nil { break }
@@ -48,10 +47,6 @@ final class PreviewTransferTests: BridgeTestCase {
         try await server.start()
         defer { server.stop() }
         let browser = try await presentBrowser(server.origin + "/page")
-        for _ in 0..<100 {
-            if browser.webView.title == "HTTP fixture" { break }
-            try await Task.sleep(for: .milliseconds(50))
-        }
         let first = try await browser.webView.callAsyncJavaScript("""
             const read=()=>fetch('/cached-preview').then(response=>response.text());
             return [await read(), await read()];
@@ -59,15 +54,12 @@ final class PreviewTransferTests: BridgeTestCase {
         let cached = try XCTUnwrap(first)
         XCTAssertEqual(cached.count, 2)
         XCTAssertEqual(cached.first, cached.last)
-        var loaded = false
-        browser.onPageFinished = { loaded = true }
+        let refreshedPage = expectation(description: "Cache-disabled navigation finished")
+        browser.onPageFinished = { refreshedPage.fulfill() }
         browser.disableCache = true
         browser.refresh()
-        for _ in 0..<100 {
-            if loaded { break }
-            try await Task.sleep(for: .milliseconds(50))
-        }
-        XCTAssertTrue(loaded)
+        await fulfillment(of: [refreshedPage], timeout: 5)
+        browser.onPageFinished = nil
         let refreshed = try await browser.webView.callAsyncJavaScript("return await fetch('/cached-preview').then(response=>response.text())", arguments: [:], in: nil, contentWorld: .page) as? String
         XCTAssertNotNil(refreshed)
         XCTAssertNotEqual(refreshed, cached.first)
@@ -82,16 +74,15 @@ final class PreviewTransferTests: BridgeTestCase {
         XCTAssertNil(host.presentedViewController)
         let browser = PreviewViewController(url: try XCTUnwrap(URL(string: origin)), theme: [:], console: false)
         browser.consoleEnabled = false
+        let loaded = expectation(description: "Initial preview navigation finished")
+        browser.onPageFinished = { loaded.fulfill() }
         await withCheckedContinuation { continuation in host.present(browser, animated: false) { continuation.resume() } }
-        return browser
-    }
-
-    private func waitForPage(_ webView: WKWebView) async throws {
-        for _ in 0..<100 {
-            if (try? await webView.evaluateJavaScript("document.title === 'Preview transfers'")) as? Bool == true { return }
-            try await Task.sleep(for: .milliseconds(50))
+        addTeardownBlock { @MainActor in
+            if browser.presentingViewController != nil { await self.close(browser) }
         }
-        XCTFail("Preview fixture did not load")
+        await fulfillment(of: [loaded], timeout: 5)
+        browser.onPageFinished = nil
+        return browser
     }
 
     private func close(_ browser: PreviewViewController) async {

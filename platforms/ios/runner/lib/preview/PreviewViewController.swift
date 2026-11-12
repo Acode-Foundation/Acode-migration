@@ -32,6 +32,8 @@ final class PreviewViewController: UIViewController {
     private(set) var isClosed = false
     private var observations: [NSKeyValueObservation] = []
     private var contextMenu: WebContextMenu?
+    private var contentBottom: NSLayoutConstraint?
+    private var contentFollowsKeyboard = true
 
     init(url: URL, theme: [String: Any], console: Bool) {
         initialURL = url
@@ -68,13 +70,16 @@ final class PreviewViewController: UIViewController {
         configureToolbar(foreground: foreground)
         for child in [toolbar, content] { child.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(child) }
         content.addSubview(webView)
+        contentBottom = content.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor)
+        contentBottom?.isActive = true
         NSLayoutConstraint.activate([
             toolbar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             toolbar.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
             toolbar.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor), toolbar.heightAnchor.constraint(equalToConstant: 45),
             content.topAnchor.constraint(equalTo: toolbar.bottomAnchor), content.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor),
-            content.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor), content.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
+            content.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor),
         ])
+        NotificationCenter.default.addObserver(self, selector: #selector(keyboardFrameChanged), name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
         observations = [
             webView.observe(\.canGoBack, options: [.new]) { [weak self] _, _ in MainActor.assumeIsolated { self?.updateMenu() } },
             webView.observe(\.canGoForward, options: [.new]) { [weak self] _, _ in MainActor.assumeIsolated { self?.updateMenu() } },
@@ -119,6 +124,24 @@ final class PreviewViewController: UIViewController {
     }
 
     var dialogPresenter: UIViewController? { isClosed ? nil : (isViewLoaded && view.window != nil ? self : auxiliaryPresenter) }
+
+    @objc private func keyboardFrameChanged(_ notification: Notification) {
+        guard !isClosed, let window = viewIfLoaded?.window,
+              let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+        // iOS 26 can leave the keyboard guide above the safe area after dismissal.
+        let visible = view.bounds.intersection(view.convert(frame, from: window.screen.coordinateSpace)).height > 0
+        guard visible != contentFollowsKeyboard else { return }
+        contentFollowsKeyboard = visible
+        let anchor = visible ? view.keyboardLayoutGuide.topAnchor : view.safeAreaLayoutGuide.bottomAnchor
+        contentBottom?.isActive = false
+        contentBottom = content.bottomAnchor.constraint(equalTo: anchor)
+        contentBottom?.isActive = true
+        let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0
+        let curve = notification.userInfo?[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt ?? 0
+        UIView.animate(withDuration: duration, delay: 0, options: UIView.AnimationOptions(rawValue: curve << 16)) {
+            self.view.layoutIfNeeded()
+        }
+    }
 
     @objc func close() {
         isClosed = true

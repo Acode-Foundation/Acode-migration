@@ -16,6 +16,7 @@ final class PreviewBrowserTests: BridgeTestCase {
             XCTAssertEqual(browser.address.text, "Console")
             XCTAssertNil(browser.menuButton.superview)
             assertCompactHeader(browser, screenshot: "console")
+            await waitForKeyboardToHide(browser)
             let initialHeight = browser.content.bounds.height
             let result = try await browser.webView.callAsyncJavaScript("""
                 const input=document.querySelector('#__c-input');
@@ -31,7 +32,7 @@ final class PreviewBrowserTests: BridgeTestCase {
             XCTAssertLessThan(browser.content.bounds.height, initialHeight, "The software keyboard must actually appear")
             attachScreenshot(browser, name: "console-keyboard")
             _ = try await browser.webView.evaluateJavaScript("document.querySelector('#__c-input').blur()")
-            try await Task.sleep(for: .milliseconds(500))
+            await waitForKeyboardToHide(browser)
             XCTAssertEqual(browser.content.bounds.height, initialHeight, accuracy: 1)
             await withCheckedContinuation { continuation in browser.dismiss(animated: false) { continuation.resume() } }
         } catch {
@@ -59,6 +60,10 @@ final class PreviewBrowserTests: BridgeTestCase {
         do {
             let browser = try await presentedBrowser(controller)
             try await waitForPage(browser.webView, expression: "document.querySelector('h1')?.textContent === 'Unsaved ✓'")
+            let titleReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                browser.address.text == "Preview fixture" && !browser.webView.isLoading
+            }, object: nil)
+            await fulfillment(of: [titleReady], timeout: 5)
             XCTAssertEqual(browser.address.text, "Preview fixture")
             assertCompactHeader(browser, screenshot: "browser")
             XCTAssertTrue(browser.address.becomeFirstResponder())
@@ -75,7 +80,7 @@ final class PreviewBrowserTests: BridgeTestCase {
             XCTAssertEqual(browser.webView.bounds.size, CGSize(width: 768, height: 1024))
             try await waitForPage(browser.webView, expression: "window.innerWidth === 768")
             XCTAssertFalse(browser.consoleVisible)
-            _ = try await browser.webView.callAsyncJavaScript("await document.documentElement.requestFullscreen()", arguments: [:], in: nil, contentWorld: .page)
+            _ = try await browser.webView.evaluateJavaScript("void document.documentElement.requestFullscreen()")
             for _ in 0..<100 {
                 if browser.webView.fullscreenState == .inFullscreen { break }
                 try await Task.sleep(for: .milliseconds(20))
@@ -87,11 +92,12 @@ final class PreviewBrowserTests: BridgeTestCase {
             let fullscreenFrame = browser.webView.convert(browser.webView.bounds, to: fullscreenWindow)
             XCTAssertEqual(fullscreenFrame.width, fullscreenWindow.bounds.width, accuracy: 1)
             XCTAssertEqual(fullscreenFrame.height, fullscreenWindow.bounds.height, accuracy: 1)
-            _ = try await browser.webView.callAsyncJavaScript("await document.exitFullscreen()", arguments: [:], in: nil, contentWorld: .page)
+            _ = try await browser.webView.evaluateJavaScript("void document.exitFullscreen()")
             for _ in 0..<100 {
                 if browser.webView.fullscreenState == .notInFullscreen { break }
                 try await Task.sleep(for: .milliseconds(20))
             }
+            XCTAssertEqual(browser.webView.fullscreenState, .notInFullscreen)
             browser.view.layoutIfNeeded()
             XCTAssertEqual(browser.webView.bounds.size, CGSize(width: 768, height: 1024))
             browser.applyViewport(nil)
@@ -141,11 +147,20 @@ final class PreviewBrowserTests: BridgeTestCase {
 
     func waitForPage(_ webView: WKWebView, expression: String) async throws {
         for _ in 0..<100 {
-            if (try? await webView.evaluateJavaScript(expression)) as? Bool == true { return }
+            if !webView.isLoading, (try? await webView.evaluateJavaScript(expression)) as? Bool == true { return }
             try await Task.sleep(for: .milliseconds(100))
         }
         let contents = try? await webView.evaluateJavaScript("document.body.innerText")
         throw NSError(domain: "AcodeTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Preview failed: \(expression); \(String(describing: contents))"])
+    }
+
+    private func waitForKeyboardToHide(_ browser: PreviewViewController) async {
+        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            browser.view.layoutIfNeeded()
+            return browser.content.bounds.height > 0 &&
+                abs(browser.content.frame.maxY - browser.view.safeAreaLayoutGuide.layoutFrame.maxY) < 1
+        }, object: nil)
+        await fulfillment(of: [hidden], timeout: 5)
     }
 
     private func cleanup(_ app: WKWebView, port: Int) async throws {

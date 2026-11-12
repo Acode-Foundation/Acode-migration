@@ -32,7 +32,8 @@ final class IOSBetaUITests: BridgeTestCase {
             return document.querySelector('.prompt.alert .message').textContent;
             """, arguments: [:], in: nil, contentWorld: .page) as? String
         XCTAssertTrue(terminal?.contains("emulation") == true)
-        XCTAssertTrue(terminal?.contains("slower") == true)
+        XCTAssertTrue(terminal?.contains("take longer") == true)
+        XCTAssertFalse(terminal?.localizedCaseInsensitiveContains("Android") == true)
         await capture(webView, name: "iOS terminal emulation info")
 
         let switches = try await webView.callAsyncJavaScript("""
@@ -48,6 +49,28 @@ final class IOSBetaUITests: BridgeTestCase {
             return !!header.querySelector('[data-action="terminal-info"]') && !header.querySelector('[action="toggle-edit-menu"]');
             """, arguments: [:], in: nil, contentWorld: .page) as? Bool
         XCTAssertEqual(switches, true)
+    }
+
+    func testTemporaryFAQReplacementPreservesBackNavigation() async throws {
+        let webView = try await editorWebView()
+        let result = try await webView.callAsyncJavaScript("""
+            await acode.exec('open','help');
+            document.querySelector('[data-key="faqs"]').click();
+            for(let i=0;!document.querySelector('#faqs-page')&&i<100;i++)await new Promise(r=>setTimeout(r,50));
+            const page=document.querySelector('#faqs-page').closest('wc-page');
+            const stack=acode.require('actionStack');
+            const before=!!stack.get('faqs');
+            page.handler.replaceEl();
+            const detached=!page.isConnected;
+            page.handler.restoreEl();
+            const result={before,detached,restored:page.isConnected,after:!!stack.get('faqs')};
+            page.hide();
+            return result;
+            """, arguments: [:], in: nil, contentWorld: .page) as? [String: Bool]
+        XCTAssertEqual(result?["before"], true)
+        XCTAssertEqual(result?["detached"], true)
+        XCTAssertEqual(result?["restored"], true)
+        XCTAssertEqual(result?["after"], true, "Temporary page replacement must preserve FAQ back navigation")
     }
 
     private func capture(_ webView: WKWebView, name: String) async {

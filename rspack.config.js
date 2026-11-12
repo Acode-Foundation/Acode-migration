@@ -23,6 +23,11 @@ module.exports = (env, options) => {
     targets: platform === 'ios' ? 'ios_saf >= 18' : 'chrome >= 67',
     mode: 'entry',
     coreJs: require('core-js/package.json').version,
+    // core-js replaces the native Array.prototype.push below Chrome 122, for
+    // edge cases (lengths past 2^32 - 1, push() with no arguments on an array
+    // with a read-only length) nothing relies on. Its JS version is ~8x
+    // slower, and the parser, CodeMirror and the renderer push constantly.
+    exclude: ['es.array.push'],
   };
   const typescriptLoader = {
     loader: 'builtin:swc-loader',
