@@ -118,12 +118,15 @@ dependencies {
     implementation(libs.bouncycastle.bcpkix)
     implementation(libs.bouncycastle.bcprov)
     implementation(libs.commons.codec)
+    implementation(libs.commons.compress)
     implementation(libs.commons.io)
     implementation(libs.commons.net)
     implementation(libs.java.websocket)
     implementation(libs.maverick.synergy.client)
     implementation(libs.nanohttpd)
     implementation(libs.okhttp)
+    implementation(libs.xz)
+    implementation(project(":proot"))
 
     //check product flavours
     "freeImplementation"(libs.play.services.ads)

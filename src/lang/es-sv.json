@@ -567,7 +567,7 @@
 	"lsp-install-info-unknown": "No se pudo comprobar automáticamente el estado de la instalación.",
 	"lsp-install-info-version-available": "Version {version} disponible.",
 	"lsp-install-notification": "{server} no está instalado. Toque para instalar.",
-	"lsp-install-method-apk": "paquete APK",
+	"lsp-install-method-apt": "APT package",
 	"lsp-install-method-cargo": "Cargo crate",
 	"lsp-install-method-manual": "Binario manual",
 	"lsp-install-method-npm": "paquete npm",

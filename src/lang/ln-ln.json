@@ -562,7 +562,7 @@
 	"lsp-install-info-unknown": "Ezalela ya installation ekoki kotala yango automatiquement te.",
 	"lsp-install-info-version-available": "Version {version} ezali.",
 	"lsp-install-notification": "{server} language server is not installed. Tap to install.",
-	"lsp-install-method-apk": "Package APK",
+	"lsp-install-method-apt": "APT package",
 	"lsp-install-method-cargo": "Package Cargo",
 	"lsp-install-method-manual": "Binaire ya mabɔkɔ",
 	"lsp-install-method-npm": "Package npm",
