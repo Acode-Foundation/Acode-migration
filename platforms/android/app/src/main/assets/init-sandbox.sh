@@ -1,40 +1,37 @@
 export LD_LIBRARY_PATH=$PREFIX
 
+# This script is sourced by the device shell (/system/bin/sh, i.e. mksh), which
+# has no arrays, so the argument list is built as a string and deliberately
+# word-split at exec. That makes an unset or whitespace-bearing path a silent
+# corruption ("-b " with no value, or /libproot.so), so validate them up front.
+: "${PREFIX:?PREFIX is not set}"
+: "${NATIVE_DIR:?NATIVE_DIR is not set}"
+
+case "$PREFIX$NATIVE_DIR" in
+    *[[:space:]]*)
+        printf '\033[31m[!]\033[0m PREFIX and NATIVE_DIR must not contain whitespace\n' >&2
+        exit 1
+        ;;
+esac
+
 mkdir -p "$PREFIX/tmp"
-mkdir -p "$PREFIX/alpine/tmp"
+mkdir -p "$PREFIX/ubuntu/tmp"
 mkdir -p "$PREFIX/public"
 
 export PROOT_TMP_DIR=$PREFIX/tmp
 
-if [ "$FDROID" = "true" ]; then
+export PROOT="$NATIVE_DIR/libproot.so"
 
-    if [ -f "$PREFIX/libproot.so" ]; then
-        export PROOT_LOADER="$PREFIX/libproot.so"
-    fi
+if [ -f "$NATIVE_DIR/libloader.so" ]; then
+    export PROOT_LOADER="$NATIVE_DIR/libloader.so"
+fi
 
-    if [ -f "$PREFIX/libproot32.so" ]; then
-        export PROOT_LOADER32="$PREFIX/libproot32.so"
-    fi
+if [ -f "$NATIVE_DIR/libloader32.so" ]; then
+    export PROOT_LOADER_32="$NATIVE_DIR/libloader32.so"
+fi
 
-
-    export PROOT="$PREFIX/libproot-xed.so"
-    chmod +x $PREFIX/*
-else
-    if [ -f "$NATIVE_DIR/libproot.so" ]; then
-        export PROOT_LOADER="$NATIVE_DIR/libproot.so"
-    fi
-
-    if [ -f "$NATIVE_DIR/libproot32.so" ]; then
-        export PROOT_LOADER32="$NATIVE_DIR/libproot32.so"
-    fi
-
-
-    if [ -e "$PREFIX/libtalloc.so.2" ] || [ -L "$PREFIX/libtalloc.so.2" ]; then
-        rm "$PREFIX/libtalloc.so.2"
-    fi
-
-    ln -s "$NATIVE_DIR/libtalloc.so" "$PREFIX/libtalloc.so.2"
-    export PROOT="$NATIVE_DIR/libproot-xed.so"
+if [ -e "$PREFIX/libtalloc.so.2" ] || [ -L "$PREFIX/libtalloc.so.2" ]; then
+    rm -f "$PREFIX/libtalloc.so.2"
 fi
 
 ARGS="--kill-on-exit"
@@ -48,6 +45,7 @@ for system_mnt in /apex /odm /product /system /system_ext /vendor /linkerconfig/
   ARGS="$ARGS -b ${system_mnt}"
  fi
 done
+
 
 
 
@@ -66,7 +64,7 @@ ARGS="$ARGS -b $NATIVE_DIR"
 ARGS="$ARGS -b $PREFIX/public:/public"
 ARGS="$ARGS -b $PREFIX/public:/home"
 ARGS="$ARGS -b $PREFIX/public:/root"
-ARGS="$ARGS -b $PREFIX/alpine/tmp:/dev/shm"
+ARGS="$ARGS -b $PREFIX/ubuntu/tmp:/dev/shm"
 
 
 # PRoot canonicalizes every -b host path with realpath(3).  The magic links
@@ -118,7 +116,7 @@ if can_bind "/proc/$SELF_PID/fd/2"; then
 fi
 
 
-ARGS="$ARGS -r $PREFIX/alpine"
+ARGS="$ARGS -r $PREFIX/ubuntu"
 ARGS="$ARGS -0"
 ARGS="$ARGS --link2symlink"
 ARGS="$ARGS --sysvipc"
@@ -148,7 +146,16 @@ if [ "$FAILSAFE" = true ] && [ "$INSTALLING" != true ]; then
         LINKER="/system/bin/linker"
     fi
 
-    exec "$LINKER" "$PREFIX/axs" -c "sh"
+    AXS_PORT="${AXS_PORT:-8767}"
+    echo "$AXS_PORT" > "$PREFIX/axs.port"
+    set -- --port "$AXS_PORT"
+    # The app is served from https://localhost, which is AXS's default CORS
+    # allowlist; only an explicit opt-in widens it to any origin.
+    if [ "${AXS_ALLOW_ANY_ORIGIN:-0}" = "1" ]; then
+        set -- "$@" --allow-any-origin
+    fi
+
+    exec "$LINKER" "$PREFIX/axs" "$@" -c "sh"
 else
-    exec "$PROOT" $ARGS /bin/sh "$PREFIX/init-alpine.sh" "$@"
+    exec "$PROOT" $ARGS /bin/sh "$PREFIX/init-ubuntu.sh" "$@"
 fi

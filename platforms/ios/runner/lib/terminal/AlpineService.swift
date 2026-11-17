@@ -17,12 +17,15 @@ final class AlpineService: BaseService {
                 case "startAxs":
                     try runtime.shareFiles()
                     let failsafe = args[safe: 0] as? Bool == true
+                    let port = (args[safe: 1] as? NSNumber)?.intValue
                     let start = {
-                        TerminalServer.shared.start(shell: failsafe ? "exec sh" : "exec bash --rcfile /initrc -i") { error in
+                        TerminalServer.shared.start(shell: failsafe ? "exec sh" : "exec bash --rcfile /initrc -i", port: port) { error in
                             if let error { callback.error(error.localizedDescription) } else { callback.success() }
                         }
                     }
                     if failsafe { start() } else { runtime.prepare(start) }
+                case "getPort":
+                    callback.success(TerminalServer.shared.currentPort)
                 case "stopAxs":
                     TerminalServer.shared.stop()
                     callback.success()

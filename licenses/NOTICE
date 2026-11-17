@@ -1,2 +1,3 @@
 Native JavaScript helpers in src/native/{argscheck,base64,builder,channel,originalSymbols,statusbar,utils}.js are adapted from Apache Cordova JS under Apache-2.0. See native-runtime-LICENSE and native-runtime-NOTICE.
 Native Android HTTP code is adapted from cordova-plugin-advanced-http; see advanced-http-LICENSE and native-provenance.json.
+The Android PRoot compatibility layer is compiled from the in-tree sources under platforms/android/proot (GPL-2.0-or-later) and bundles Samba talloc (LGPL-3.0-or-later); see proot-LICENSE and talloc-LICENSE.
