@@ -5,13 +5,14 @@ import UIKit
 /// passes through emulated sockets. Guest shells are the only emulated part.
 final class TerminalServer {
     static let shared = TerminalServer()
-    private static let port = 8767
+    static let defaultPort = 8767
     private static let origins: Set = ["https://localhost", "acode://localhost"]
     private static let captureLimit = 16 * 1024 * 1024
     private let queue = DispatchQueue(label: "app.acode.terminal", qos: .userInitiated)
     private let runtime = AlpineRuntime.shared
     private var server: LocalHTTPServer?
     private var listening = false
+    private var port = TerminalServer.defaultPort
     private var shell = ""
     private var sessions: [Int32: TerminalSession] = [:]
 
@@ -24,10 +25,21 @@ final class TerminalServer {
 
     var isRunning: Bool { queue.sync { listening } }
 
-    func start(shell: String, completion: @escaping (Error?) -> Void) {
+    /// Port the listener is bound to, or the port it will bind next.
+    var currentPort: Int { queue.sync { port } }
+
+    func start(shell: String, port requestedPort: Int? = nil, completion: @escaping (Error?) -> Void) {
         queue.async { [self] in
-            guard server == nil else { completion(nil); return }
+            if let requestedPort, requestedPort > 0, requestedPort <= Int(UInt16.max) {
+                port = requestedPort
+            }
             self.shell = shell
+            guard server == nil else {
+                // A live server object is not proof the port is bound: iOS
+                // reclaims the socket while suspended. Re-listen in that case.
+                if listening { completion(nil) } else { listen(completion) }
+                return
+            }
             listen(completion)
         }
     }
@@ -44,7 +56,7 @@ final class TerminalServer {
 
     private func listen(_ completion: @escaping (Error?) -> Void = { _ in }) {
         do {
-            let server = try LocalHTTPServer(port: Self.port, loopback: true, queue: queue)
+            let server = try LocalHTTPServer(port: port, loopback: true, queue: queue)
             self.server = server
             server.onRequest = { [weak self] request, client in self?.route(request, client) }
             server.start { [weak self, weak server] result in

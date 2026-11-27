@@ -67,7 +67,10 @@ class Bridge(private val webView: AppWebView, private val webActivity: BaseWebAc
                         try {
                             if (!service.execute(action, args, callback)) {
                                 callback.sendPayload(
-                                    Payload(Payload.Status.INVALID_ACTION, action)
+                                    Payload(
+                                        Payload.Status.INVALID_ACTION,
+                                        "Unknown native action: $name.$action"
+                                    )
                                 )
                             }
                         } catch (exception: Exception) {
